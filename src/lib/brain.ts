@@ -2,10 +2,12 @@ import { ollamaChatStream, ollamaChat, AGENT_MODELS, modelForTag, OllamaMessage 
 import { buildBrainSystemPrompt, buildAgentPrompt } from './prompts'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+function db() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
 
 export interface BrainMessage {
   role: 'user' | 'assistant'
@@ -27,7 +29,7 @@ export async function* streamBrainResponse(
 ): AsyncGenerator<string> {
   const { language = 'en', companyName = 'your company', companyId, plan = 'free' } = ctx
 
-  await supabase.from('messages').insert({
+  await db().from('messages').insert({
     conversation_id: conversationId,
     role: 'user',
     content: userMessage,
@@ -57,7 +59,7 @@ export async function* streamBrainResponse(
   }
 
   if (fullResponse) {
-    await supabase.from('messages').insert({
+    await db().from('messages').insert({
       conversation_id: conversationId,
       role: 'assistant',
       content: fullResponse,
@@ -72,7 +74,7 @@ export async function* streamBrainResponse(
       const taskList = JSON.parse(tasksMatch[1])
       for (const t of taskList) {
         const tag = t.tag ?? 'general'
-        await supabase.from('tasks').insert({
+        await db().from('tasks').insert({
           company_id: companyId,
           conversation_id: conversationId,
           title: t.title,
@@ -89,10 +91,10 @@ export async function* streamBrainResponse(
 }
 
 export async function runAgentTask(taskId: string, language = 'en'): Promise<void> {
-  const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).single()
+  const { data: task } = await db().from('tasks').select('*').eq('id', taskId).single()
   if (!task) return
 
-  await supabase.from('tasks').update({
+  await db().from('tasks').update({
     status: 'in_progress',
     started_at: new Date().toISOString(),
   }).eq('id', taskId)
@@ -101,7 +103,7 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
   const systemPrompt = buildAgentPrompt(task.tag, language)
 
   try {
-    await supabase.from('task_logs').insert({
+    await db().from('task_logs').insert({
       task_id: taskId,
       type: 'info',
       content: `Agent started: ${task.tag} | Model: ${model}`,
@@ -112,20 +114,20 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
       { model, system: systemPrompt }
     )
 
-    await supabase.from('task_logs').insert({ task_id: taskId, type: 'output', content: result })
-    await supabase.from('tasks').update({
+    await db().from('task_logs').insert({ task_id: taskId, type: 'output', content: result })
+    await db().from('tasks').update({
       status: 'completed',
       completed_at: new Date().toISOString(),
       result: { output: result },
     }).eq('id', taskId)
 
-    await supabase.from('agents')
+    await db().from('agents')
       .update({ status: 'idle', last_active: new Date().toISOString() })
       .eq('type', task.tag)
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
-    await supabase.from('task_logs').insert({ task_id: taskId, type: 'error', content: msg })
-    await supabase.from('tasks').update({ status: 'failed', error: msg }).eq('id', taskId)
+    await db().from('task_logs').insert({ task_id: taskId, type: 'error', content: msg })
+    await db().from('tasks').update({ status: 'failed', error: msg }).eq('id', taskId)
   }
 }

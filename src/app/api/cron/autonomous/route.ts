@@ -11,10 +11,12 @@ export const maxDuration = 300 // 5 min max for cron
 const CRON_SECRET = process.env.CRON_SECRET ?? ''
 
 // Use service role key to bypass RLS for autonomous operations
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+function db() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
 
 export async function GET(req: NextRequest) {
   // Verify cron secret (set in Vercel env)
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // 1. Run up to 5 pending tasks
-    const { data: pendingTasks } = await supabase
+    const { data: pendingTasks } = await db()
       .from('tasks')
       .select('id, tag, title, company_id')
       .eq('status', 'todo')
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. For each company with no recent tasks, generate new ones
-    const { data: companies } = await supabase
+    const { data: companies } = await db()
       .from('companies')
       .select('id, name, description, industry, stage, user_id')
       .limit(20)
@@ -55,7 +57,7 @@ export async function GET(req: NextRequest) {
     if (companies?.length) {
       for (const company of companies) {
         // Check if this company has any pending tasks
-        const { count } = await supabase
+        const { count } = await db()
           .from('tasks')
           .select('id', { count: 'exact', head: true })
           .eq('company_id', company.id)
@@ -64,7 +66,7 @@ export async function GET(req: NextRequest) {
         if ((count ?? 0) > 0) continue // Already has work queued
 
         // Check last autonomous run for this company (throttle to once per hour)
-        const { data: lastRun } = await supabase
+        const { data: lastRun } = await db()
           .from('autonomous_runs')
           .select('started_at')
           .eq('company_id', company.id)
@@ -78,7 +80,7 @@ export async function GET(req: NextRequest) {
         }
 
         // Log this autonomous run
-        const { data: run } = await supabase.from('autonomous_runs').insert({
+        const { data: run } = await db().from('autonomous_runs').insert({
           company_id: company.id,
           status: 'running',
           started_at: startedAt,
@@ -86,7 +88,7 @@ export async function GET(req: NextRequest) {
 
         try {
           // Ask brain to generate new tasks for this company
-          const profile = await supabase
+          const profile = await db()
             .from('profiles')
             .select('language, plan')
             .eq('id', company.user_id)
@@ -119,7 +121,7 @@ Output a task block with 2-3 high-leverage tasks. Be specific.`
             const taskList = JSON.parse(match[1])
             for (const t of taskList) {
               const tag = t.tag ?? 'research'
-              await supabase.from('tasks').insert({
+              await db().from('tasks').insert({
                 company_id: company.id,
                 title: t.title,
                 description: t.description,
@@ -134,7 +136,7 @@ Output a task block with 2-3 high-leverage tasks. Be specific.`
           }
 
           if (run) {
-            await supabase.from('autonomous_runs').update({
+            await db().from('autonomous_runs').update({
               status: 'completed',
               completed_at: new Date().toISOString(),
             }).eq('id', run.id)
@@ -142,7 +144,7 @@ Output a task block with 2-3 high-leverage tasks. Be specific.`
         } catch (e) {
           results.push(`Brain failed for ${company.name}: ${e}`)
           if (run) {
-            await supabase.from('autonomous_runs').update({ status: 'failed' }).eq('id', run.id)
+            await db().from('autonomous_runs').update({ status: 'failed' }).eq('id', run.id)
           }
         }
       }

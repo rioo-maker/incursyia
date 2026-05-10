@@ -3,13 +3,15 @@ import { NextResponse } from 'next/server'
 
 export const revalidate = 0
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+function db() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
 
 export async function GET() {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('platform_stats')
     .select('revenue_eur, companies, ad_campaigns, tasks_done, updated_at')
     .single()
