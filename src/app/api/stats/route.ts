@@ -11,16 +11,21 @@ function db() {
 }
 
 export async function GET() {
-  const { data, error } = await db()
-    .from('platform_stats')
-    .select('revenue_eur, companies, ad_campaigns, tasks_done, updated_at')
-    .single()
+  const client = db()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  const [companiesRes, tasksRes, adsRes] = await Promise.all([
+    client.from('companies').select('id', { count: 'exact', head: true }),
+    client.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+    client.from('tasks').select('id', { count: 'exact', head: true }).eq('tag', 'ads').eq('status', 'completed'),
+  ])
 
-  return NextResponse.json(data, {
+  return NextResponse.json({
+    revenue_eur: 0,
+    companies: companiesRes.count ?? 0,
+    ad_campaigns: adsRes.count ?? 0,
+    tasks_done: tasksRes.count ?? 0,
+    updated_at: new Date().toISOString(),
+  }, {
     headers: { 'Cache-Control': 'no-store' },
   })
 }

@@ -2,8 +2,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001'
-
 interface Task {
   id: string; title: string; tag: string; status: string; priority: string;
   estimated_hours: number; model: string; created_at: string; description?: string; error?: string
@@ -72,19 +70,29 @@ export default function TasksPage() {
   const [filter, setFilter] = useState('all')
   const [creating, setCreating] = useState(false)
   const [newTask, setNewTask] = useState({ title: '', tag: 'general', priority: 'medium', description: '' })
+  const [companyId, setCompanyId] = useState<string | null>(null)
 
-  const load = () => {
-    supabase.from('tasks').select('*').eq('company_id', COMPANY_ID).order('created_at', { ascending: false })
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return
+      const { data } = await supabase.from('companies').select('id').eq('user_id', user.id).order('created_at').limit(1).single()
+      if (data?.id) setCompanyId(data.id)
+    })
+  }, [])
+
+  const load = (cid: string) => {
+    supabase.from('tasks').select('*').eq('company_id', cid).order('created_at', { ascending: false })
       .then(({ data }) => setTasks(data as Task[] ?? []))
   }
 
   useEffect(() => {
-    load()
+    if (!companyId) return
+    load(companyId)
     const sub = supabase.channel('tasks_page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `company_id=eq.${companyId}` }, () => load(companyId))
       .subscribe()
     return () => { supabase.removeChannel(sub) }
-  }, [])
+  }, [companyId])
 
   const runTask = async (id: string) => {
     await fetch('/api/tasks/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: id }) })
@@ -92,14 +100,17 @@ export default function TasksPage() {
 
   const deleteTask = async (id: string) => {
     await fetch('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
-    load()
+    if (companyId) load(companyId)
   }
 
   const createTask = async () => {
-    await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newTask) })
-    setCreating(false)
-    setNewTask({ title: '', tag: 'general', priority: 'medium', description: '' })
-    load()
+    if (!newTask.title.trim()) return
+    const res = await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newTask) })
+    if (res.ok) {
+      setCreating(false)
+      setNewTask({ title: '', tag: 'general', priority: 'medium', description: '' })
+      if (companyId) load(companyId)
+    }
   }
 
   const filtered = filter === 'all' ? tasks : tasks.filter(t => t.status === filter)

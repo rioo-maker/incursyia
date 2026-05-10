@@ -3,17 +3,17 @@ const KEY  = process.env.OLLAMA_API_KEY ?? ''
 
 // Best model per task type
 export const AGENT_MODELS: Record<string, string> = {
-  brain:       'kimi-k2-thinking',   // planning, reasoning, routing
-  engineering: 'qwen3-coder:480b',   // code generation & debugging
-  browser:     'kimi-k2:1t',          // web automation planning
-  research:    'deepseek-v4-flash',  // research & analysis
-  email:       'deepseek-v4-flash',  // copywriting & outreach
-  content:     'deepseek-v4-flash',  // creative content generation
-  ads:         'qwen3-next:80b',     // ad strategy & copy
-  data:        'qwen3-next:80b',     // SQL, analytics
-  support:     'gpt-oss:20b',        // fast customer support
-  vision:      'qwen3-vl:235b',      // screenshot analysis
-  fast:        'ministral-3:8b',     // quick classifications
+  brain:       'llama3.1:70b',       // planning, reasoning, routing
+  engineering: 'qwen2.5-coder:32b',  // code generation & debugging
+  browser:     'llama3.1:70b',       // web automation planning
+  research:    'llama3.1:70b',       // research & analysis
+  email:       'llama3.2',           // copywriting & outreach
+  content:     'llama3.2',           // creative content generation
+  ads:         'llama3.1:70b',       // ad strategy & copy
+  data:        'qwen2.5-coder:7b',   // SQL, analytics
+  support:     'llama3.2:3b',        // fast customer support
+  vision:      'llava:13b',          // screenshot analysis
+  fast:        'llama3.2:3b',        // quick classifications
 }
 
 export interface OllamaMessage {
