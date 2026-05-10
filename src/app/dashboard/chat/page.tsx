@@ -3,17 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Logo } from '@/components/Logo'
 
-const CONV_ID = '00000000-0000-0000-0000-000000000002'
-
 interface Message { id: string; role: string; content: string; model?: string; created_at: string }
 
 function MessageBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === 'user'
   return (
-    <div style={{
-      display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start',
-      marginBottom: 16,
-    }}>
+    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 16 }}>
       {!isUser && (
         <div style={{ marginRight: 10, marginTop: 2, flexShrink: 0 }}>
           <Logo size={18} showText={false} />
@@ -29,7 +24,6 @@ function MessageBubble({ msg }: { msg: Message }) {
         fontFamily: 'var(--font-body)', fontSize: 14, lineHeight: 1.6,
         whiteSpace: 'pre-wrap',
       }}>
-        {/* Render task blocks differently */}
         {msg.content.split(/(```tasks[\s\S]*?```)/g).map((part, i) => {
           if (part.startsWith('```tasks')) {
             const json = part.replace(/```tasks\s*/, '').replace(/```$/, '').trim()
@@ -45,7 +39,7 @@ function MessageBubble({ msg }: { msg: Message }) {
                       <span style={{ fontSize: 11, background: 'rgba(255,255,255,.06)', padding: '2px 8px', borderRadius: 4, color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>{t.tag}</span>
                       <div>
                         <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{t.title}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{t.priority} priority · {t.estimated_hours ?? 1}h</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{t.priority} · {t.estimated_hours ?? 1}h</div>
                       </div>
                     </div>
                   ))}
@@ -75,22 +69,47 @@ function StreamingMessage({ content }: { content: string }) {
         color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontSize: 14, lineHeight: 1.6,
         whiteSpace: 'pre-wrap',
       }}>
-        {content || <span style={{ opacity: .4 }}>Thinking<span style={{ animation: 'pulse-dot 1s infinite' }}>...</span></span>}
+        {content || <span style={{ opacity: .4 }}>Thinking...</span>}
       </div>
     </div>
   )
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState('')
+  const [messages, setMessages]   = useState<Message[]>([])
+  const [convId, setConvId]       = useState<string | null>(null)
+  const [input, setInput]         = useState('')
   const [streaming, setStreaming] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading]     = useState(false)
+  const [chatError, setChatError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // Load real user's conversation on mount
   useEffect(() => {
-    supabase.from('messages').select('*').eq('conversation_id', CONV_ID).order('created_at')
-      .then(({ data }) => setMessages(data as Message[] ?? []))
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: company } = await supabase
+        .from('companies').select('id').eq('user_id', user.id).order('created_at').limit(1).single()
+      if (!company) return
+
+      let { data: conv } = await supabase
+        .from('conversations').select('id').eq('company_id', company.id).order('created_at').limit(1).single()
+
+      if (!conv) {
+        const { data: newConv } = await supabase
+          .from('conversations').insert({ company_id: company.id, title: 'Main chat' }).select().single()
+        conv = newConv
+      }
+
+      if (conv) {
+        setConvId(conv.id)
+        const { data: msgs } = await supabase
+          .from('messages').select('*').eq('conversation_id', conv.id).order('created_at')
+        setMessages(msgs as Message[] ?? [])
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -103,8 +122,9 @@ export default function ChatPage() {
     setInput('')
     setLoading(true)
     setStreaming('')
+    setChatError('')
 
-    const history = messages.slice(-10).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    const history = messages.slice(-12).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
     setMessages(prev => [...prev, {
       id: Date.now().toString(), role: 'user', content: text, created_at: new Date().toISOString(),
@@ -114,12 +134,18 @@ export default function ChatPage() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: CONV_ID, message: text, history }),
+        body: JSON.stringify({ conversationId: convId, message: text, history }),
       })
+
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`HTTP ${res.status}: ${errText}`)
+      }
 
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let full = ''
+      let apiError = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -129,19 +155,24 @@ export default function ChatPage() {
           const data = line.slice(6)
           if (data === '[DONE]') break
           try {
-            const { token, error } = JSON.parse(data)
-            if (error) throw new Error(error)
-            if (token) { full += token; setStreaming(full) }
+            const parsed = JSON.parse(data)
+            if (parsed.error) { apiError = parsed.error; break }
+            if (parsed.token) { full += parsed.token; setStreaming(full) }
           } catch {}
         }
+        if (apiError) break
       }
 
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(), role: 'assistant', content: full,
-        model: 'kimi-k2-thinking', created_at: new Date().toISOString(),
-      }])
+      if (apiError) {
+        setChatError(apiError)
+      } else if (full) {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(), role: 'assistant', content: full,
+          model: 'kimi-k2-thinking', created_at: new Date().toISOString(),
+        }])
+      }
     } catch (err) {
-      console.error(err)
+      setChatError(err instanceof Error ? err.message : 'Connection failed')
     } finally {
       setStreaming('')
       setLoading(false)
@@ -150,7 +181,6 @@ export default function ChatPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
       <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 18, color: 'var(--text-primary)' }}>AI Co-Founder</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
@@ -159,14 +189,28 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Messages */}
       <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
+        {messages.length === 0 && !loading && (
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+            <div style={{ fontSize: 32, marginBottom: 16 }}>◎</div>
+            <div style={{ fontSize: 15, marginBottom: 8 }}>Your AI co-founder is ready.</div>
+            <div style={{ fontSize: 13, opacity: 0.6 }}>Describe your goal — it will plan, delegate, and execute.</div>
+          </div>
+        )}
         {messages.map(m => <MessageBubble key={m.id} msg={m} />)}
         {loading && <StreamingMessage content={streaming} />}
+        {chatError && (
+          <div style={{
+            margin: '0 0 16px', padding: '12px 16px',
+            background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)',
+            borderRadius: 10, fontFamily: 'var(--font-body)', fontSize: 13, color: '#F87171',
+          }}>
+            Error: {chatError}
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 12 }}>
         <textarea
           value={input}
