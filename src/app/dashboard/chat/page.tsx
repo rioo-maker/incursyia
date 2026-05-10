@@ -1,0 +1,202 @@
+'use client'
+import { useEffect, useRef, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Logo } from '@/components/Logo'
+
+const CONV_ID = '00000000-0000-0000-0000-000000000002'
+
+interface Message { id: string; role: string; content: string; model?: string; created_at: string }
+
+function MessageBubble({ msg }: { msg: Message }) {
+  const isUser = msg.role === 'user'
+  return (
+    <div style={{
+      display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start',
+      marginBottom: 16,
+    }}>
+      {!isUser && (
+        <div style={{ marginRight: 10, marginTop: 2, flexShrink: 0 }}>
+          <Logo size={18} showText={false} />
+        </div>
+      )}
+      <div style={{
+        maxWidth: '72%',
+        background: isUser ? 'var(--accent)' : 'var(--bg-card)',
+        border: isUser ? 'none' : '1px solid var(--border-subtle)',
+        borderRadius: isUser ? '16px 16px 4px 16px' : '4px 16px 16px 16px',
+        padding: '12px 16px',
+        color: isUser ? '#0C0C0C' : 'var(--text-primary)',
+        fontFamily: 'var(--font-body)', fontSize: 14, lineHeight: 1.6,
+        whiteSpace: 'pre-wrap',
+      }}>
+        {/* Render task blocks differently */}
+        {msg.content.split(/(```tasks[\s\S]*?```)/g).map((part, i) => {
+          if (part.startsWith('```tasks')) {
+            const json = part.replace(/```tasks\s*/, '').replace(/```$/, '').trim()
+            try {
+              const tasks = JSON.parse(json)
+              return (
+                <div key={i} style={{ marginTop: 8, border: '1px solid var(--border-accent)', borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ background: 'var(--accent-subtle)', padding: '8px 12px', fontSize: 11, fontWeight: 600, color: 'var(--accent)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                    {tasks.length} task{tasks.length !== 1 ? 's' : ''} created
+                  </div>
+                  {tasks.map((t: { title: string; tag: string; priority: string; estimated_hours?: number }, j: number) => (
+                    <div key={j} style={{ padding: '10px 12px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: 11, background: 'rgba(255,255,255,.06)', padding: '2px 8px', borderRadius: 4, color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>{t.tag}</span>
+                      <div>
+                        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{t.title}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{t.priority} priority · {t.estimated_hours ?? 1}h</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            } catch { return <pre key={i} style={{ fontSize: 12, opacity: .6 }}>{part}</pre> }
+          }
+          return <span key={i}>{part}</span>
+        })}
+        {msg.model && !isUser && (
+          <div style={{ marginTop: 6, fontSize: 10, opacity: .4 }}>{msg.model}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StreamingMessage({ content }: { content: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 16 }}>
+      <div style={{ marginRight: 10, marginTop: 2, flexShrink: 0 }}>
+        <Logo size={18} showText={false} />
+      </div>
+      <div style={{
+        maxWidth: '72%', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+        borderRadius: '4px 16px 16px 16px', padding: '12px 16px',
+        color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontSize: 14, lineHeight: 1.6,
+        whiteSpace: 'pre-wrap',
+      }}>
+        {content || <span style={{ opacity: .4 }}>Thinking<span style={{ animation: 'pulse-dot 1s infinite' }}>...</span></span>}
+      </div>
+    </div>
+  )
+}
+
+export default function ChatPage() {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [streaming, setStreaming] = useState('')
+  const [loading, setLoading] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    supabase.from('messages').select('*').eq('conversation_id', CONV_ID).order('created_at')
+      .then(({ data }) => setMessages(data as Message[] ?? []))
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, streaming])
+
+  const send = async () => {
+    if (!input.trim() || loading) return
+    const text = input.trim()
+    setInput('')
+    setLoading(true)
+    setStreaming('')
+
+    const history = messages.slice(-10).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(), role: 'user', content: text, created_at: new Date().toISOString(),
+    }])
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: CONV_ID, message: text, history }),
+      })
+
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let full = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const lines = decoder.decode(value).split('\n').filter(l => l.startsWith('data: '))
+        for (const line of lines) {
+          const data = line.slice(6)
+          if (data === '[DONE]') break
+          try {
+            const { token, error } = JSON.parse(data)
+            if (error) throw new Error(error)
+            if (token) { full += token; setStreaming(full) }
+          } catch {}
+        }
+      }
+
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(), role: 'assistant', content: full,
+        model: 'kimi-k2-thinking', created_at: new Date().toISOString(),
+      }])
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setStreaming('')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 18, color: 'var(--text-primary)' }}>AI Co-Founder</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6EE7A0', animation: 'pulse-dot 2s ease-in-out infinite' }}/>
+          <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: '#6EE7A0' }}>kimi-k2-thinking · online</span>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
+        {messages.map(m => <MessageBubble key={m.id} msg={m} />)}
+        {loading && <StreamingMessage content={streaming} />}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 12 }}>
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          placeholder="Describe your goal, a bug to fix, a campaign to launch..."
+          rows={1}
+          style={{
+            flex: 1, resize: 'none', padding: '14px 16px',
+            background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+            borderRadius: 10, color: 'var(--text-primary)', fontFamily: 'var(--font-body)',
+            fontSize: 14, outline: 'none', lineHeight: 1.5,
+            transition: 'border .2s', minHeight: 50, maxHeight: 140,
+          }}
+          onFocus={e => (e.target.style.borderColor = 'var(--border-accent)')}
+          onBlur={e => (e.target.style.borderColor = 'var(--border-subtle)')}
+        />
+        <button
+          onClick={send}
+          disabled={loading || !input.trim()}
+          style={{
+            padding: '14px 22px', background: loading ? 'rgba(217,119,87,.4)' : 'var(--accent)',
+            border: 'none', borderRadius: 10, color: '#0C0C0C',
+            fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600,
+            cursor: loading ? 'not-allowed' : 'pointer', transition: 'all .2s',
+          }}
+        >
+          {loading ? '◌' : '→'}
+        </button>
+      </div>
+    </div>
+  )
+}

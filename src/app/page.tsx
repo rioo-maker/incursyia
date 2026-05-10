@@ -14,7 +14,7 @@ export default function Home() {
   const [showSignup, setShowSignup] = useState(false)
 
   const handleCTA = () => setShowSignup(true)
-  const handleDash = () => setShowSignup(true)
+  const handleDash = () => { window.location.href = '/dashboard' }
 
   return (
     <>
