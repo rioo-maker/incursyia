@@ -5,7 +5,8 @@ import { ollamaChat, AGENT_MODELS, modelForTag } from '@/lib/ollama'
 import { buildBrainSystemPrompt } from '@/lib/prompts'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300 // 5 min max for cron
+export const maxDuration = 300
+export const schedule = '0 0 * * *' // Daily at midnight UTC
 
 // Require a secret to prevent unauthorized calls
 const CRON_SECRET = process.env.CRON_SECRET ?? ''
