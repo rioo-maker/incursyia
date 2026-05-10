@@ -1,19 +1,19 @@
 const BASE = process.env.OLLAMA_BASE_URL ?? 'https://ollama.com'
 const KEY  = process.env.OLLAMA_API_KEY ?? ''
 
-// Best model per task type
+// Best model per task type (all available at https://ollama.com/api/tags)
 export const AGENT_MODELS: Record<string, string> = {
-  brain:       'llama3.1:70b',       // planning, reasoning, routing
-  engineering: 'qwen2.5-coder:32b',  // code generation & debugging
-  browser:     'llama3.1:70b',       // web automation planning
-  research:    'llama3.1:70b',       // research & analysis
-  email:       'llama3.2',           // copywriting & outreach
-  content:     'llama3.2',           // creative content generation
-  ads:         'llama3.1:70b',       // ad strategy & copy
-  data:        'qwen2.5-coder:7b',   // SQL, analytics
-  support:     'llama3.2:3b',        // fast customer support
-  vision:      'llava:13b',          // screenshot analysis
-  fast:        'llama3.2:3b',        // quick classifications
+  brain:       'gpt-oss:120b',          // planning, reasoning, routing
+  engineering: 'devstral-small-2:24b',  // code generation & debugging
+  browser:     'gpt-oss:120b',          // web automation planning
+  research:    'gpt-oss:120b',          // research & analysis
+  email:       'gpt-oss:20b',           // copywriting & outreach
+  content:     'gpt-oss:20b',           // creative content generation
+  ads:         'gpt-oss:120b',          // ad strategy & copy
+  data:        'devstral-small-2:24b',  // SQL, analytics
+  support:     'gpt-oss:20b',           // fast customer support
+  vision:      'qwen3-vl:235b',         // screenshot analysis
+  fast:        'ministral-3:3b',        // quick classifications
 }
 
 export interface OllamaMessage {
