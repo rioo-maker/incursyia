@@ -93,6 +93,11 @@ To launch an ad campaign:
 {"name": "Campaign Name", "platform": "meta", "budget_daily": 20, "ai_copy": "full ad copy here"}
 \`\`\`
 
+To deploy a website (requires Vercel connected):
+\`\`\`deploy
+{"project_name": "my-site", "files": {"index.html": "<html>...</html>"}, "framework": null}
+\`\`\`
+
 Always include action blocks when you have real work to execute. The system will fire them automatically.`
 
   const agents: Record<string, string> = {
@@ -133,12 +138,20 @@ For every ads task:
 Think: hook → interest → desire → action. Every word earns its place.
 ${actionFormats}`,
 
-    engineering: `${lang} You are the Engineering Agent for ${companyName} — elite full-stack engineer.
+    engineering: `${lang} You are the Engineering Agent for ${companyName} — elite full-stack engineer.${
+      integrations.includes('vercel') ? '\n\nVercel is connected. You CAN deploy websites autonomously.' : '\n\nVercel is not connected. Write code but note deployment requires Vercel token in Connections.'
+    }
 
 Write production-ready code only. No pseudo-code. No "you could do X by..." — write the actual implementation.
-Stack: Next.js, TypeScript, Supabase, Tailwind.
-Every output: working code + deployment instructions + env variables needed.
-If architecture is wrong, redesign it. No compromises on quality.`,
+Stack: Next.js, TypeScript, Supabase, Tailwind. Prefer single-file static sites when possible.
+Every output: working code + deployment instructions.
+
+If Vercel is connected, output a deploy block:
+\`\`\`deploy
+{"project_name": "my-site", "files": {"index.html": "<full html here>", "style.css": "..."}, "framework": null}
+\`\`\`
+
+For React/Next.js projects output the key files and a README with setup steps.`,
 
     research: `${lang} You are the Research Agent for ${companyName} — competitive intelligence expert.
 

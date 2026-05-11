@@ -115,6 +115,17 @@ async function executeActions(result: string, companyId: string, taskId: string)
     } catch (e) { logs.push(`✗ post_social parse error: ${e}`) }
   }
 
+  // deploy blocks
+  for (const m of result.matchAll(/```deploy\s*([\s\S]*?)```/g)) {
+    try {
+      const payload = JSON.parse(m[1].trim())
+      const r = await call('/api/deploy', payload)
+      const msg = r.ok ? `✓ Deployed to ${r.url}` : `✗ Deploy failed: ${r.error}`
+      logs.push(msg)
+      await sdb().from('task_logs').insert({ task_id: taskId, type: r.ok ? 'action' : 'error', content: msg })
+    } catch (e) { logs.push(`✗ deploy parse error: ${e}`) }
+  }
+
   // launch_ad blocks
   for (const m of result.matchAll(/```launch_ad\s*([\s\S]*?)```/g)) {
     try {

@@ -99,6 +99,24 @@ const SERVICES = [
     ],
     link: 'https://developers.facebook.com/apps/',
   },
+  {
+    id: 'vercel',
+    name: 'Vercel Deploy',
+    icon: '',
+    color: '#FFFFFF',
+    description: 'Let the engineering agent auto-deploy websites and apps it builds.',
+    fields: [
+      { key: 'api_token', label: 'API Token', placeholder: 'xxxxxxxxxxxxxxxxxxxxxxxxx', secret: true },
+      { key: 'team_id', label: 'Team ID (optional)', placeholder: 'team_xxxxxxxx', secret: false },
+    ],
+    guide: [
+      { step: 1, text: 'Go to vercel.com/account/tokens' },
+      { step: 2, text: 'Click "Create Token" — give it a name like "IncursYIA Agent"' },
+      { step: 3, text: 'Copy the token and paste below' },
+      { step: 4, text: 'Team ID: optional, only needed if deploying to a team account' },
+    ],
+    link: 'https://vercel.com/account/tokens',
+  },
 ]
 
 // ─── Component ────────────────────────────────────────────────────────────────

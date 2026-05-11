@@ -82,6 +82,7 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState('')
   const [loading, setLoading]     = useState(false)
   const [chatError, setChatError] = useState('')
+  const [runningTasks, setRunningTasks] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Load real user's conversation on mount
@@ -168,8 +169,17 @@ export default function ChatPage() {
       } else if (full) {
         setMessages(prev => [...prev, {
           id: Date.now().toString(), role: 'assistant', content: full,
-          model: 'kimi-k2-thinking', created_at: new Date().toISOString(),
+          model: 'gpt-oss:120b', created_at: new Date().toISOString(),
         }])
+
+        // If the brain created tasks, run them immediately
+        if (full.includes('```tasks')) {
+          setRunningTasks(true)
+          fetch('/api/tasks/auto-run', { method: 'POST' })
+            .then(r => r.json())
+            .then(() => setRunningTasks(false))
+            .catch(() => setRunningTasks(false))
+        }
       }
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'Connection failed')
@@ -185,7 +195,7 @@ export default function ChatPage() {
         <span style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 18, color: 'var(--text-primary)' }}>AI Co-Founder</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6EE7A0', animation: 'pulse-dot 2s ease-in-out infinite' }}/>
-          <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: '#6EE7A0' }}>kimi-k2-thinking · online</span>
+          <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: '#6EE7A0' }}>gpt-oss:120b · online</span>
         </div>
       </div>
 
@@ -199,6 +209,12 @@ export default function ChatPage() {
         )}
         {messages.map(m => <MessageBubble key={m.id} msg={m} />)}
         {loading && <StreamingMessage content={streaming} />}
+        {runningTasks && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', marginBottom: 12, background: 'rgba(110,231,160,.06)', border: '1px solid rgba(110,231,160,.2)', borderRadius: 10, fontFamily: 'var(--font-body)', fontSize: 13, color: '#6EE7A0' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6EE7A0', animation: 'pulse-dot 1s ease-in-out infinite' }} />
+            Agents running tasks — emails sending, posts publishing...
+          </div>
+        )}
         {chatError && (
           <div style={{
             margin: '0 0 16px', padding: '12px 16px',
