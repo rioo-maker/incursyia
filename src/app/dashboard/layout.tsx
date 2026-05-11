@@ -6,15 +6,16 @@ import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 const NAV = [
-  { href: '/dashboard',           icon: '◈', label: 'Overview' },
-  { href: '/dashboard/chat',      icon: '◎', label: 'Chat' },
-  { href: '/dashboard/tasks',     icon: '⊞', label: 'Tasks' },
-  { href: '/dashboard/agents',    icon: '◉', label: 'Agents' },
-  { href: '/dashboard/memory',    icon: '◫', label: 'Memory' },
-  { href: '/dashboard/emails',    icon: '◻', label: 'Emails' },
-  { href: '/dashboard/social',    icon: '◈', label: 'Social' },
-  { href: '/dashboard/ads',       icon: '◆', label: 'Ads' },
-  { href: '/dashboard/analytics', icon: '◑', label: 'Analytics' },
+  { href: '/dashboard',             icon: '◈', label: 'Overview' },
+  { href: '/dashboard/chat',        icon: '◎', label: 'Chat' },
+  { href: '/dashboard/tasks',       icon: '⊞', label: 'Tasks' },
+  { href: '/dashboard/agents',      icon: '◉', label: 'Agents' },
+  { href: '/dashboard/memory',      icon: '◫', label: 'Memory' },
+  { href: '/dashboard/emails',      icon: '◻', label: 'Emails' },
+  { href: '/dashboard/social',      icon: '◈', label: 'Social' },
+  { href: '/dashboard/ads',         icon: '◆', label: 'Ads' },
+  { href: '/dashboard/analytics',   icon: '◑', label: 'Analytics' },
+  { href: '/dashboard/connections', icon: '⟁', label: 'Connections' },
 ]
 
 function SidebarLink({ href, icon, label }: { href: string; icon: string; label: string }) {

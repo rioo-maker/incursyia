@@ -1,36 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { getCredentials, getCompanyIdForUser } from '@/lib/integrations'
 
-// Meta Marketing API — create a campaign
-async function launchMetaCampaign(name: string, dailyBudgetCents: number, adCopy: string) {
-  const token = process.env.META_ACCESS_TOKEN
-  const accountId = process.env.META_AD_ACCOUNT_ID // act_XXXXXXXXXX
+async function getUserId(): Promise<string | null> {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll() { return cookieStore.getAll() }, setAll() {} } }
+  )
+  const { data: { user } } = await supabase.auth.getUser()
+  return user?.id ?? null
+}
 
-  if (!token || !accountId) return { error: 'META_ACCESS_TOKEN and META_AD_ACCOUNT_ID not configured' }
+async function launchMetaCampaign(name: string, dailyBudgetCents: number, creds: Record<string, string>) {
+  const { access_token, ad_account_id } = creds
+  if (!access_token || !ad_account_id) return { error: 'Missing Meta credentials', needs_setup: true }
 
-  const base = `https://graph.facebook.com/v18.0/${accountId}`
+  const base = `https://graph.facebook.com/v18.0/${ad_account_id}`
 
-  // 1. Create campaign
   const campRes = await fetch(`${base}/campaigns`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, objective: 'OUTCOME_TRAFFIC', status: 'PAUSED', access_token: token }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, objective: 'OUTCOME_TRAFFIC', status: 'PAUSED', access_token }),
   })
   const camp = await campRes.json()
   if (!campRes.ok || camp.error) return { error: camp.error?.message ?? JSON.stringify(camp) }
 
-  // 2. Create ad set
   const adSetRes = await fetch(`${base}/adsets`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: `${name} – Ad Set`,
-      campaign_id: camp.id,
-      daily_budget: dailyBudgetCents,
-      billing_event: 'IMPRESSIONS',
-      optimization_goal: 'LINK_CLICKS',
-      status: 'PAUSED',
+      name: `${name} – Ad Set`, campaign_id: camp.id,
+      daily_budget: dailyBudgetCents, billing_event: 'IMPRESSIONS',
+      optimization_goal: 'LINK_CLICKS', status: 'PAUSED',
       targeting: { geo_locations: { countries: ['US', 'GB', 'FR', 'DE'] }, age_min: 25, age_max: 55 },
-      access_token: token,
+      access_token,
     }),
   })
   const adSet = await adSetRes.json()
@@ -42,21 +46,25 @@ async function launchMetaCampaign(name: string, dailyBudgetCents: number, adCopy
 export async function POST(req: NextRequest) {
   const { name, platform, budget_daily, ai_copy, company_id } = await req.json()
 
+  let companyId = company_id
+  if (!companyId) {
+    const userId = await getUserId()
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    companyId = await getCompanyIdForUser(userId)
+  }
+  if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 404 })
+
+  const creds = await getCredentials(companyId, platform === 'meta' ? 'meta' : platform)
+
   if (platform === 'meta') {
-    const result = await launchMetaCampaign(name, Math.round(budget_daily * 100), ai_copy ?? '')
-    if (result.error) {
-      return NextResponse.json({ ok: false, error: result.error, needs_setup: !process.env.META_ACCESS_TOKEN }, { status: 400 })
-    }
+    const result = await launchMetaCampaign(name, Math.round(budget_daily * 100), creds)
+    if ('error' in result) return NextResponse.json({ ok: false, ...result }, { status: 503 })
     return NextResponse.json({ ok: true, ...result })
   }
 
-  if (platform === 'google') {
-    return NextResponse.json({
-      ok: false,
-      error: 'Google Ads requires Google Ads API OAuth setup. Add GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CUSTOMER_ID to env vars.',
-      needs_setup: true,
-    })
-  }
-
-  return NextResponse.json({ ok: false, error: `${platform} launch not yet implemented`, needs_setup: true })
+  return NextResponse.json({
+    ok: false,
+    error: `${platform} ads launch not yet implemented. Add your credentials in Connections.`,
+    needs_setup: true,
+  })
 }
