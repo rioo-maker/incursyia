@@ -58,11 +58,32 @@ export default function EmailsPage() {
 
   const sendEmail = async () => {
     if (!company) return
-    await supabase.from('emails').insert({
-      company_id: company.companyId, from_addr: 'agent@incursyia.ai',
-      to_addr: [draft.to], subject: draft.subject, body: draft.body,
-      direction: 'outbound', status: 'sent',
+    // Try to actually send via Resend; fall back to DB-only if key not set
+    const sendRes = await fetch('/api/email/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: draft.to, subject: draft.subject, body: draft.body, from_name: company.companyName }),
     })
+    const sendData = await sendRes.json()
+    const status = sendData.ok ? 'sent' : (sendData.needs_setup ? 'draft' : 'failed')
+    const errorMsg = sendData.error
+
+    await supabase.from('emails').insert({
+      company_id: company.companyId,
+      from_addr: 'agent@incursyia.ai',
+      to_addr: [draft.to],
+      subject: draft.subject,
+      body: draft.body,
+      direction: 'outbound',
+      status,
+      error: errorMsg ?? null,
+    })
+
+    if (status === 'draft' || status === 'failed') {
+      alert(sendData.error?.includes('not configured')
+        ? '⚠️ Email saved as draft. To send real emails, add RESEND_API_KEY to your Vercel env vars.'
+        : `Failed to send: ${errorMsg}`)
+    }
+
     setComposing(false)
     setDraft({ to: '', subject: '', body: '' })
     load(company.companyId)

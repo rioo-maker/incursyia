@@ -61,10 +61,41 @@ export default function SocialPage() {
 
   const schedulePost = async () => {
     if (!company) return
+
+    let externalId: string | null = null
+    let postStatus = draft.scheduled_at ? 'scheduled' : 'draft'
+
+    // If no scheduled time = publish now
+    if (!draft.scheduled_at) {
+      const res = await fetch('/api/social/post', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: draft.platform, content: draft.content }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        postStatus = 'published'
+        externalId = data.external_id ?? null
+      } else if (data.needs_setup) {
+        alert(`⚠️ Post saved as draft. To publish on ${draft.platform}, add the required API keys to your Vercel env vars:\n\n${
+          draft.platform === 'twitter'
+            ? 'TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET'
+            : draft.platform === 'linkedin'
+            ? 'LINKEDIN_ACCESS_TOKEN, LINKEDIN_AUTHOR_ID'
+            : 'META_ACCESS_TOKEN, META_AD_ACCOUNT_ID'
+        }`)
+      } else {
+        alert(`Failed to post: ${data.error}`)
+      }
+    }
+
     await supabase.from('social_posts').insert({
-      company_id: company.companyId, platform: draft.platform, content: draft.content,
-      status: draft.scheduled_at ? 'scheduled' : 'draft',
+      company_id: company.companyId,
+      platform: draft.platform,
+      content: draft.content,
+      status: postStatus,
       scheduled_at: draft.scheduled_at || null,
+      external_id: externalId,
+      published_at: postStatus === 'published' ? new Date().toISOString() : null,
     })
     setComposing(false)
     setDraft({ platform: 'twitter', content: '', scheduled_at: '' })
