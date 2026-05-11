@@ -1,12 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompany } from '@/lib/useCompany'
 import Link from 'next/link'
-
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001'
 
 interface Task { id: string; title: string; tag: string; status: string; priority: string; created_at: string }
 interface Agent { id: string; name: string; type: string; status: string; model: string; total_tasks: number }
+interface Stats { revenue_eur: number; companies: number; tasks_done: number }
 
 function StatusDot({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -18,33 +18,27 @@ function StatusDot({ status }: { status: string }) {
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div style={{
-      background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-      borderRadius: 12, ...style,
-    }}>
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, ...style }}>
       {children}
     </div>
   )
 }
 
 export default function DashboardPage() {
+  const company = useCompany()
   const [tasks, setTasks] = useState<Task[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
-  const [stats, setStats] = useState<{ revenue_eur: number; companies: number; tasks_done: number } | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
 
+  // Fetch real stats from API (counts real data, not demo table)
   useEffect(() => {
-    supabase.from('tasks').select('*').eq('company_id', COMPANY_ID).order('created_at', { ascending: false }).limit(6)
-      .then(({ data }) => setTasks(data ?? []))
-    supabase.from('agents').select('*').order('name')
-      .then(({ data }) => setAgents(data ?? []))
-    supabase.from('platform_stats').select('revenue_eur,companies,tasks_done').single()
-      .then(({ data }) => setStats(data as typeof stats))
+    fetch('/api/stats').then(r => r.json()).then(setStats)
+  }, [])
 
-    const sub = supabase.channel('dash')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
-        supabase.from('tasks').select('*').eq('company_id', COMPANY_ID).order('created_at', { ascending: false }).limit(6)
-          .then(({ data }) => setTasks(data ?? []))
-      })
+  // Fetch agents (global, not per-company)
+  useEffect(() => {
+    supabase.from('agents').select('*').order('name').then(({ data }) => setAgents(data ?? []))
+    const sub = supabase.channel('dash_agents')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agents' }, () => {
         supabase.from('agents').select('*').order('name').then(({ data }) => setAgents(data ?? []))
       })
@@ -52,19 +46,33 @@ export default function DashboardPage() {
     return () => { supabase.removeChannel(sub) }
   }, [])
 
+  // Fetch tasks for this user's company only
+  useEffect(() => {
+    if (!company) return
+    const load = () => {
+      supabase.from('tasks').select('*').eq('company_id', company.companyId)
+        .order('created_at', { ascending: false }).limit(6)
+        .then(({ data }) => setTasks(data ?? []))
+    }
+    load()
+    const sub = supabase.channel('dash_tasks')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `company_id=eq.${company.companyId}` }, load)
+      .subscribe()
+    return () => { supabase.removeChannel(sub) }
+  }, [company])
+
   const activeTasks = tasks.filter(t => t.status === 'in_progress').length
   const pendingTasks = tasks.filter(t => t.status === 'todo').length
   const busyAgents = agents.filter(a => a.status === 'busy').length
 
   return (
     <div style={{ padding: '32px 36px', maxWidth: 1200 }}>
-      {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 28, color: 'var(--text-primary)', marginBottom: 4 }}>
           Good day, let&apos;s build.
         </h1>
         <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-muted)' }}>
-          Autonomous AI co-founder — monitoring your business.
+          {company ? `${company.companyName} — autonomous AI co-founder` : 'Autonomous AI co-founder — monitoring your business.'}
         </p>
       </div>
 
@@ -74,7 +82,7 @@ export default function DashboardPage() {
           { label: 'Active tasks', value: activeTasks, color: 'var(--accent)' },
           { label: 'Pending tasks', value: pendingTasks, color: '#FCD34D' },
           { label: 'Agents busy', value: busyAgents, color: '#93C5FD' },
-          { label: 'Revenue (live)', value: stats ? `€${(stats.revenue_eur / 1000).toFixed(1)}k` : '—', color: '#6EE7A0' },
+          { label: 'Revenue (live)', value: stats ? `€${stats.revenue_eur > 0 ? (stats.revenue_eur / 1000).toFixed(1) + 'k' : '0'}` : '—', color: '#6EE7A0' },
         ].map(k => (
           <Card key={k.label} style={{ padding: '20px 24px' }}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.08em' }}>{k.label}</div>

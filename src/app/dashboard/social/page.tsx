@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompany } from '@/lib/useCompany'
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001'
 interface Post { id: string; platform: string; content: string; status: string; scheduled_at?: string; published_at?: string; metrics: Record<string, number> }
 
 const PLATFORM_COLOR: Record<string, string> = {
@@ -10,25 +10,35 @@ const PLATFORM_COLOR: Record<string, string> = {
 }
 
 export default function SocialPage() {
+  const company = useCompany()
   const [posts, setPosts] = useState<Post[]>([])
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState({ platform: 'twitter', content: '', scheduled_at: '' })
   const [generating, setGenerating] = useState(false)
 
-  const load = () => {
-    supabase.from('social_posts').select('*').eq('company_id', COMPANY_ID).order('created_at', { ascending: false })
+  const load = (companyId: string) => {
+    supabase.from('social_posts').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
       .then(({ data }) => setPosts(data as Post[] ?? []))
   }
-  useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (!company) return
+    load(company.companyId)
+    const sub = supabase.channel('social_page')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'social_posts', filter: `company_id=eq.${company.companyId}` }, () => load(company.companyId))
+      .subscribe()
+    return () => { supabase.removeChannel(sub) }
+  }, [company])
 
   const generatePost = async () => {
+    if (!company) return
     setGenerating(true)
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        conversationId: '00000000-0000-0000-0000-000000000002',
-        message: `Write a compelling ${draft.platform} post for our AI co-founder platform IncursYIA. Make it engaging, under ${draft.platform === 'twitter' ? '280' : '500'} characters. Output only the post text.`,
+        conversationId: company.conversationId,
+        message: `Write a compelling ${draft.platform} post for ${company.companyName}. Make it engaging, under ${draft.platform === 'twitter' ? '280' : '500'} characters. Output only the post text.`,
         history: [],
       }),
     })
@@ -50,14 +60,15 @@ export default function SocialPage() {
   }
 
   const schedulePost = async () => {
+    if (!company) return
     await supabase.from('social_posts').insert({
-      company_id: COMPANY_ID, platform: draft.platform, content: draft.content,
+      company_id: company.companyId, platform: draft.platform, content: draft.content,
       status: draft.scheduled_at ? 'scheduled' : 'draft',
       scheduled_at: draft.scheduled_at || null,
     })
     setComposing(false)
     setDraft({ platform: 'twitter', content: '', scheduled_at: '' })
-    load()
+    load(company.companyId)
   }
 
   const inputStyle: React.CSSProperties = {
@@ -89,7 +100,7 @@ export default function SocialPage() {
               value={draft.content} onChange={e => setDraft(p => ({ ...p, content: e.target.value }))}
               style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 100 }}
             />
-            <button onClick={generatePost} disabled={generating} style={{
+            <button onClick={generatePost} disabled={generating || !company} style={{
               position: 'absolute', top: 8, right: 8, padding: '4px 10px', background: 'var(--accent-subtle)',
               border: '1px solid var(--border-accent)', borderRadius: 6, color: 'var(--accent)',
               fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600, cursor: 'pointer',

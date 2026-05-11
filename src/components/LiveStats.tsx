@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { supabase, PlatformStats } from '@/lib/supabase'
 
 function useInView() {
   const ref = useRef<HTMLDivElement>(null)
@@ -74,31 +73,19 @@ function Stat({ value, prefix = '', suffix = '', label, inView }: StatProps) {
 
 export function LiveStats() {
   const [ref, visible] = useInView()
-  const [stats, setStats] = useState<PlatformStats | null>(null)
+  const [stats, setStats] = useState<{ revenue_eur: number; companies: number; ad_campaigns: number; tasks_done: number } | null>(null)
 
   useEffect(() => {
-    // Initial fetch
-    supabase
-      .from('platform_stats')
-      .select('*')
-      .single()
-      .then(({ data }) => { if (data) setStats(data as PlatformStats) })
-
-    // Realtime subscription
-    const channel = supabase
-      .channel('platform_stats_changes')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'platform_stats' }, payload => {
-        setStats(payload.new as PlatformStats)
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
+    fetch('/api/stats').then(r => r.json()).then(setStats)
+    // Refresh every 60s so the counter stays live without needing platform_stats table
+    const t = setInterval(() => fetch('/api/stats').then(r => r.json()).then(setStats), 60000)
+    return () => clearInterval(t)
   }, [])
 
-  const revenue = stats?.revenue_eur ?? 4847329
-  const companies = stats?.companies ?? 2847
-  const campaigns = stats?.ad_campaigns ?? 12432
-  const tasks = stats?.tasks_done ?? 289456
+  const revenue = stats?.revenue_eur ?? 0
+  const companies = stats?.companies ?? 0
+  const campaigns = stats?.ad_campaigns ?? 0
+  const tasks = stats?.tasks_done ?? 0
 
   return (
     <section

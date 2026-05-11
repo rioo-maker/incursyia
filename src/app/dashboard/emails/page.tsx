@@ -1,29 +1,40 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompany } from '@/lib/useCompany'
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001'
 interface Email { id: string; from_addr: string; to_addr: string[]; subject: string; status: string; direction: string; opened: boolean; created_at: string }
 
 export default function EmailsPage() {
+  const company = useCompany()
   const [emails, setEmails] = useState<Email[]>([])
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState({ to: '', subject: '', body: '' })
   const [tab, setTab] = useState<'inbox' | 'outreach'>('inbox')
   const [generating, setGenerating] = useState(false)
 
-  useEffect(() => {
-    supabase.from('emails').select('*').eq('company_id', COMPANY_ID).order('created_at', { ascending: false })
+  const load = (companyId: string) => {
+    supabase.from('emails').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
       .then(({ data }) => setEmails(data as Email[] ?? []))
-  }, [])
+  }
+
+  useEffect(() => {
+    if (!company) return
+    load(company.companyId)
+    const sub = supabase.channel('emails_page')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emails', filter: `company_id=eq.${company.companyId}` }, () => load(company.companyId))
+      .subscribe()
+    return () => { supabase.removeChannel(sub) }
+  }, [company])
 
   const generateEmailWithAI = async () => {
+    if (!company) return
     setGenerating(true)
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        conversationId: '00000000-0000-0000-0000-000000000002',
+        conversationId: company.conversationId,
         message: `Write a cold outreach email for: to ${draft.to || 'a prospect'} about ${draft.subject || 'our product'}. Output only the email body, no explanations.`,
         history: [],
       }),
@@ -46,15 +57,15 @@ export default function EmailsPage() {
   }
 
   const sendEmail = async () => {
+    if (!company) return
     await supabase.from('emails').insert({
-      company_id: COMPANY_ID, from_addr: 'agent@incursyia.ai',
+      company_id: company.companyId, from_addr: 'agent@incursyia.ai',
       to_addr: [draft.to], subject: draft.subject, body: draft.body,
       direction: 'outbound', status: 'sent',
     })
     setComposing(false)
     setDraft({ to: '', subject: '', body: '' })
-    supabase.from('emails').select('*').eq('company_id', COMPANY_ID).order('created_at', { ascending: false })
-      .then(({ data }) => setEmails(data as Email[] ?? []))
+    load(company.companyId)
   }
 
   const inputStyle: React.CSSProperties = {
@@ -83,7 +94,7 @@ export default function EmailsPage() {
             <input placeholder="Subject" value={draft.subject} onChange={e => setDraft(p => ({ ...p, subject: e.target.value }))} style={inputStyle} />
             <div style={{ position: 'relative' }}>
               <textarea placeholder="Body — or use AI to generate it" value={draft.body} onChange={e => setDraft(p => ({ ...p, body: e.target.value }))} style={{ ...inputStyle, resize: 'vertical', minHeight: 120 }} />
-              <button onClick={generateEmailWithAI} disabled={generating} style={{
+              <button onClick={generateEmailWithAI} disabled={generating || !company} style={{
                 position: 'absolute', top: 8, right: 8, padding: '4px 10px', background: 'var(--accent-subtle)',
                 border: '1px solid var(--border-accent)', borderRadius: 6, color: 'var(--accent)',
                 fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
