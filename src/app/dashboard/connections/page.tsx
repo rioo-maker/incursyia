@@ -9,7 +9,7 @@ const SERVICES = [
   {
     id: 'resend',
     name: 'Resend',
-    icon: '✉️',
+    icon: '',
     color: '#6366F1',
     description: 'Send real emails via your own Resend account.',
     fields: [
@@ -27,8 +27,8 @@ const SERVICES = [
   {
     id: 'twitter',
     name: 'Twitter / X',
-    icon: '𝕏',
-    color: '#000000',
+    icon: '',
+    color: '#111111',
     description: 'Auto-publish tweets from your AI agent.',
     fields: [
       { key: 'api_key', label: 'API Key', placeholder: 'xxxxxxxxxxxxxxxxxxxxxxxx', secret: true },
@@ -47,7 +47,7 @@ const SERVICES = [
   {
     id: 'linkedin',
     name: 'LinkedIn',
-    icon: 'in',
+    icon: '',
     color: '#0077B5',
     description: 'Post company updates and thought leadership.',
     fields: [
@@ -65,7 +65,7 @@ const SERVICES = [
   {
     id: 'tiktok',
     name: 'TikTok',
-    icon: '♪',
+    icon: '',
     color: '#FF0050',
     description: 'Auto-publish videos to TikTok via Content Posting API.',
     fields: [
@@ -83,7 +83,7 @@ const SERVICES = [
   {
     id: 'meta',
     name: 'Meta (Facebook / Instagram)',
-    icon: '⬡',
+    icon: '',
     color: '#1877F2',
     description: 'Launch Meta Ads campaigns and post to Facebook & Instagram pages.',
     fields: [
@@ -196,10 +196,9 @@ export default function ConnectionsPage() {
                 style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', cursor: 'pointer' }}
               >
                 <div style={{
-                  width: 40, height: 40, borderRadius: 10, background: `${svc.color}20`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: svc.icon.length > 1 ? 13 : 20, fontWeight: 700, color: svc.color, flexShrink: 0,
-                }}>{svc.icon}</div>
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: svc.color, flexShrink: 0, marginTop: 4,
+                }} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--font-body)', fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>{svc.name}</div>
                   <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{svc.description}</div>
