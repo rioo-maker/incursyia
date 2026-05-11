@@ -127,6 +127,7 @@ export default function ConnectionsPage() {
   const [form, setForm] = useState<Record<string, Record<string, string>>>({})
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!company) return
@@ -153,25 +154,40 @@ export default function ConnectionsPage() {
 
   const handleSave = async (serviceId: string) => {
     setSaving(serviceId)
+    setSaveError(null)
     const credentials = form[serviceId] ?? {}
     // Filter out empty strings — keep only filled fields
     const filled = Object.fromEntries(Object.entries(credentials).filter(([, v]) => v.trim()))
 
-    const res = await fetch('/api/integrations', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ service: serviceId, credentials: filled }),
-    })
-    if (res.ok) {
-      setSaved(serviceId)
-      setTimeout(() => setSaved(null), 2000)
-      // Refresh list
-      fetch('/api/integrations').then(r => r.json()).then((data: Integration[]) => {
-        const map: Record<string, Integration> = {}
-        data.forEach(i => { map[i.service] = i })
-        setIntegrations(map)
-      })
+    if (Object.keys(filled).length === 0) {
+      setSaveError('Fill in at least one field before saving.')
+      setSaving(null)
+      return
     }
-    setSaving(null)
+
+    try {
+      const res = await fetch('/api/integrations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: serviceId, credentials: filled }),
+      })
+      const json = await res.json()
+      if (res.ok) {
+        setSaved(serviceId)
+        setTimeout(() => setSaved(null), 2000)
+        // Refresh list
+        fetch('/api/integrations').then(r => r.json()).then((data: Integration[]) => {
+          const map: Record<string, Integration> = {}
+          data.forEach(i => { map[i.service] = i })
+          setIntegrations(map)
+        })
+      } else {
+        setSaveError(json.error ?? `Error ${res.status}`)
+      }
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Network error')
+    } finally {
+      setSaving(null)
+    }
   }
 
   const handleDisconnect = async (serviceId: string) => {
@@ -274,6 +290,13 @@ export default function ConnectionsPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Save error */}
+                  {saveError && expanded === svc.id && (
+                    <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.25)', borderRadius: 7, fontFamily: 'var(--font-body)', fontSize: 12, color: '#F87171' }}>
+                      {saveError}
+                    </div>
+                  )}
 
                   {/* Actions */}
                   <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center' }}>
