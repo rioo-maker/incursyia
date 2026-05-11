@@ -176,9 +176,7 @@ export default function ChatPage() {
         if (full.includes('```tasks')) {
           setRunningTasks(true)
           fetch('/api/tasks/auto-run', { method: 'POST' })
-            .then(r => r.json())
-            .then(() => setRunningTasks(false))
-            .catch(() => setRunningTasks(false))
+            .finally(() => setRunningTasks(false))
         }
       }
     } catch (err) {

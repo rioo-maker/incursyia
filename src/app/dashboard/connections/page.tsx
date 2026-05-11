@@ -103,7 +103,7 @@ const SERVICES = [
     id: 'vercel',
     name: 'Vercel Deploy',
     icon: '',
-    color: '#FFFFFF',
+    color: '#E5E5E5',
     description: 'Let the engineering agent auto-deploy websites and apps it builds.',
     fields: [
       { key: 'api_token', label: 'API Token', placeholder: 'xxxxxxxxxxxxxxxxxxxxxxxxx', secret: true },

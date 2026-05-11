@@ -143,7 +143,7 @@ ${actionFormats}`,
     }
 
 Write production-ready code only. No pseudo-code. No "you could do X by..." — write the actual implementation.
-Stack: Next.js, TypeScript, Supabase, Tailwind. Prefer single-file static sites when possible.
+Stack: Next.js, TypeScript, Supabase, Tailwind. For landing pages and simple tools, prefer a single self-contained HTML file. For full apps, output all key files.
 Every output: working code + deployment instructions.
 
 If Vercel is connected, output a deploy block:

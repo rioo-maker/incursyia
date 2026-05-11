@@ -47,15 +47,11 @@ export async function POST(req: NextRequest) {
 
   if (!tasks?.length) return NextResponse.json({ ok: true, ran: 0 })
 
-  const results: string[] = []
-  for (const task of tasks) {
-    try {
-      await runAgentTask(task.id)
-      results.push(`✓ ${task.title}`)
-    } catch (e) {
-      results.push(`✗ ${task.title}: ${e}`)
-    }
-  }
+  // Run all tasks in parallel — don't block on each one sequentially
+  const settled = await Promise.allSettled(tasks.map(task => runAgentTask(task.id)))
+  const results = settled.map((r, i) =>
+    r.status === 'fulfilled' ? `✓ ${tasks[i].title}` : `✗ ${tasks[i].title}: ${r.reason}`
+  )
 
   return NextResponse.json({ ok: true, ran: tasks.length, results })
 }
