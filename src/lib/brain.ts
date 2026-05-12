@@ -116,47 +116,70 @@ async function executeActions(result: string, companyId: string, taskId: string)
     } catch (e) { logs.push(`✗ post_social parse error: ${e}`) }
   }
 
-  // deploy blocks — with robust JSON recovery for LLM output
-  for (const m of result.matchAll(/```deploy\s*([\s\S]*?)```/g)) {
+  // ── New multi-block deploy format ──
+  // ```deploy-meta
+  // {"project_name":"my-site","framework":"nextjs"}
+  // ```
+  // ```deploy-file:path/to/file.tsx
+  // raw file content here — no JSON escaping needed
+  // ```
+  const metaMatch = result.match(/```deploy-meta\s*([\s\S]*?)```/)
+  const fileBlocks = [...result.matchAll(/```deploy-file:([^\n]+)\n([\s\S]*?)```/g)]
+
+  if (metaMatch && fileBlocks.length > 0) {
     try {
-      let raw = m[1].trim()
-      let payload: Record<string, unknown>
-
-      try {
-        payload = JSON.parse(raw)
-      } catch {
-        // LLM often produces broken JSON with unescaped newlines/quotes in file content.
-        // Try to extract project_name and the HTML content directly with regex.
-        const nameMatch = raw.match(/"project_name"\s*:\s*"([^"]+)"/)
-        const htmlMatch = raw.match(/"index\.html"\s*:\s*"([\s\S]+)"\s*\}\s*,?\s*"framework"/)
-          || raw.match(/"index\.html"\s*:\s*"([\s\S]+)"\s*\}/)
-
-        if (nameMatch && htmlMatch) {
-          // Unescape common LLM escaping issues
-          let html = htmlMatch[1]
-            .replace(/\\n/g, '\n')
-            .replace(/\\t/g, '\t')
-            .replace(/\\"/g, '"')
-            .replace(/\\\\/g, '\\')
-          // Remove trailing junk (unmatched braces, etc.)
-          const lastHtmlTag = html.lastIndexOf('</html>')
-          if (lastHtmlTag !== -1) html = html.substring(0, lastHtmlTag + 7)
-
-          payload = { project_name: nameMatch[1], files: { 'index.html': html }, framework: null }
-          await sdb().from('task_logs').insert({ task_id: taskId, type: 'info', content: 'Deploy JSON was malformed — recovered using regex extraction' })
-        } else {
-          throw new Error('Could not recover deploy payload from malformed JSON')
-        }
+      const meta = JSON.parse(metaMatch[1].trim())
+      const files: Record<string, string> = {}
+      for (const fb of fileBlocks) {
+        files[fb[1].trim()] = fb[2]  // raw content, no JSON escaping issues
       }
+      const payload = { project_name: meta.project_name, files, framework: meta.framework ?? null }
+      await sdb().from('task_logs').insert({ task_id: taskId, type: 'info', content: `Deploying ${Object.keys(files).length} files: ${Object.keys(files).join(', ')}` })
 
       const r = await call('/api/deploy', payload)
       const msg = r.ok ? `✓ Deployed to ${r.url}` : `✗ Deploy failed: ${r.error}`
       logs.push(msg)
       await sdb().from('task_logs').insert({ task_id: taskId, type: r.ok ? 'action' : 'error', content: msg })
     } catch (e) {
-      const errMsg = `✗ deploy parse error: ${e}`
+      const errMsg = `✗ deploy-meta parse error: ${e}`
       logs.push(errMsg)
       await sdb().from('task_logs').insert({ task_id: taskId, type: 'error', content: errMsg })
+    }
+  }
+
+  // ── Legacy single-block deploy format (fallback) ──
+  // ```deploy
+  // {"project_name":"x","files":{"index.html":"..."},"framework":null}
+  // ```
+  if (!metaMatch) {
+    for (const m of result.matchAll(/```deploy\s*([\s\S]*?)```/g)) {
+      try {
+        let payload: Record<string, unknown>
+        try {
+          payload = JSON.parse(m[1].trim())
+        } catch {
+          // Regex recovery for single-file HTML deploys
+          const nameMatch = m[1].match(/"project_name"\s*:\s*"([^"]+)"/)
+          const htmlMatch = m[1].match(/"index\.html"\s*:\s*"([\s\S]+)"\s*\}\s*,?\s*"framework"/)
+            || m[1].match(/"index\.html"\s*:\s*"([\s\S]+)"\s*\}/)
+          if (nameMatch && htmlMatch) {
+            let html = htmlMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+            const lastTag = html.lastIndexOf('</html>')
+            if (lastTag !== -1) html = html.substring(0, lastTag + 7)
+            payload = { project_name: nameMatch[1], files: { 'index.html': html }, framework: null }
+          } else {
+            throw new Error('Could not parse deploy JSON')
+          }
+        }
+        const r = await call('/api/deploy', payload)
+        const msg = r.ok ? `✓ Deployed to ${r.url}` : `✗ Deploy failed: ${r.error}`
+        logs.push(msg)
+        await sdb().from('task_logs').insert({ task_id: taskId, type: r.ok ? 'action' : 'error', content: msg })
+      } catch (e) {
+        const errMsg = `✗ deploy parse error: ${e}`
+        logs.push(errMsg)
+        await sdb().from('task_logs').insert({ task_id: taskId, type: 'error', content: errMsg })
+      }
     }
   }
 

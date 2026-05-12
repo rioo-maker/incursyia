@@ -94,8 +94,11 @@ To launch an ad campaign:
 \`\`\`
 
 To deploy a website (requires Vercel connected):
-\`\`\`deploy
-{"project_name": "my-site", "files": {"index.html": "<html>...</html>"}, "framework": null}
+\`\`\`deploy-meta
+{"project_name": "my-site", "framework": null}
+\`\`\`
+\`\`\`deploy-file:index.html
+<html>full HTML here</html>
 \`\`\`
 
 Always include action blocks when you have real work to execute. The system will fire them automatically.`
@@ -144,38 +147,51 @@ ${integrations.includes('vercel')
   ? `## CRITICAL: Vercel is CONNECTED — you MUST deploy automatically.
 You have a live Vercel connection. Your job is NOT to describe code — it is to BUILD AND DEPLOY it NOW.
 
-## MANDATORY: SINGLE HTML FILE
-ALWAYS build as ONE self-contained index.html file with ALL CSS and JS inlined.
-This applies to: landing pages, blogs, dashboards, tools, portfolios — EVERYTHING.
-Do NOT output multiple files. Do NOT use Next.js, React, or any framework that needs npm install.
-The deploy system serves static files ONLY — no build step, no npm, no node_modules.
+## DEPLOY FORMAT (MANDATORY)
+To deploy, output these blocks. The system parses them and deploys to Vercel automatically.
 
-## MANDATORY OUTPUT FORMAT
-End your response with EXACTLY this format (the deploy block triggers real deployment):
-
-\`\`\`deploy
-{"project_name": "descriptive-name", "files": {"index.html": "FULL HTML HERE"}, "framework": null}
+**Step 1: metadata block** (tiny JSON — just name + framework)
+\`\`\`deploy-meta
+{"project_name": "my-site", "framework": null}
 \`\`\`
 
-RULES:
-- "files" contains ONLY {"index.html": "..."} — one single complete HTML file
-- The HTML must include all CSS in <style> tags and all JS in <script> tags
-- project_name: lowercase-with-hyphens (e.g. "riocorp-blog", "seo-landing")
-- framework: ALWAYS null (static files only)
-- NEVER use "..." or placeholder content — write the FULL complete HTML
-- NEVER use backslashes to escape quotes inside the HTML — use single quotes in HTML attributes
-- If you don't output a deploy block, NOTHING gets deployed and you have FAILED
+**Step 2: one block per file** (raw code — NO JSON escaping needed!)
+\`\`\`deploy-file:index.html
+<!DOCTYPE html>
+<html lang="en">
+<head><title>My Site</title></head>
+<body><h1>Hello</h1></body>
+</html>
+\`\`\`
 
-## EXAMPLE OUTPUT:
-\`\`\`deploy
-{"project_name": "my-blog", "files": {"index.html": "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>Blog</title><style>body{font-family:sans-serif;max-width:800px;margin:0 auto;padding:20px}</style></head><body><h1>My Blog</h1><p>Content here</p><script>console.log('ready')</script></body></html>"}, "framework": null}
-\`\`\``
+\`\`\`deploy-file:style.css
+body { font-family: sans-serif; }
+\`\`\`
+
+\`\`\`deploy-file:app.js
+console.log("ready");
+\`\`\`
+
+## RULES
+- You can deploy ANY number of files — HTML, CSS, JS, images, configs, etc.
+- Each file gets its own \`\`\`deploy-file:path/to/file\`\`\` block with RAW content (no escaping)
+- project_name: lowercase-with-hyphens (e.g. "riocorp-landing", "blog-seo")
+- framework: null for static sites, "nextjs" for Next.js projects (Vercel handles the build)
+- For Next.js: include package.json, pages/components, etc. — Vercel runs npm install + build
+- For static sites: just HTML/CSS/JS files
+- NEVER use "..." or placeholder content — write the FULL complete file
+- If you don't output deploy-meta + deploy-file blocks, NOTHING gets deployed and you FAILED
+
+## WHAT TO BUILD
+- Simple landing pages, tools → single index.html with inline CSS/JS is fine
+- Blogs, multi-page sites → multiple HTML files or a Next.js project
+- Full apps → Next.js with package.json, framework: "nextjs"
+- Choose the right approach for the task — you have full flexibility`
   : `## Note: Vercel is NOT connected
 Write production-ready code, but deployment requires the user to add their Vercel API token in the Connections page.
 Include setup instructions with the code.`}
 
 Write production-ready code only. No pseudo-code. No "you could do X by..." — write the actual implementation.
-The deploy system is static-only. Build everything as a single self-contained HTML file with inline CSS and JS.
 ${actionFormats}`,
 
     research: `${lang} You are the Research Agent for ${companyName} — competitive intelligence expert.
