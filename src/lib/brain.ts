@@ -116,15 +116,48 @@ async function executeActions(result: string, companyId: string, taskId: string)
     } catch (e) { logs.push(`✗ post_social parse error: ${e}`) }
   }
 
-  // deploy blocks
+  // deploy blocks — with robust JSON recovery for LLM output
   for (const m of result.matchAll(/```deploy\s*([\s\S]*?)```/g)) {
     try {
-      const payload = JSON.parse(m[1].trim())
+      let raw = m[1].trim()
+      let payload: Record<string, unknown>
+
+      try {
+        payload = JSON.parse(raw)
+      } catch {
+        // LLM often produces broken JSON with unescaped newlines/quotes in file content.
+        // Try to extract project_name and the HTML content directly with regex.
+        const nameMatch = raw.match(/"project_name"\s*:\s*"([^"]+)"/)
+        const htmlMatch = raw.match(/"index\.html"\s*:\s*"([\s\S]+)"\s*\}\s*,?\s*"framework"/)
+          || raw.match(/"index\.html"\s*:\s*"([\s\S]+)"\s*\}/)
+
+        if (nameMatch && htmlMatch) {
+          // Unescape common LLM escaping issues
+          let html = htmlMatch[1]
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\')
+          // Remove trailing junk (unmatched braces, etc.)
+          const lastHtmlTag = html.lastIndexOf('</html>')
+          if (lastHtmlTag !== -1) html = html.substring(0, lastHtmlTag + 7)
+
+          payload = { project_name: nameMatch[1], files: { 'index.html': html }, framework: null }
+          await sdb().from('task_logs').insert({ task_id: taskId, type: 'info', content: 'Deploy JSON was malformed — recovered using regex extraction' })
+        } else {
+          throw new Error('Could not recover deploy payload from malformed JSON')
+        }
+      }
+
       const r = await call('/api/deploy', payload)
       const msg = r.ok ? `✓ Deployed to ${r.url}` : `✗ Deploy failed: ${r.error}`
       logs.push(msg)
       await sdb().from('task_logs').insert({ task_id: taskId, type: r.ok ? 'action' : 'error', content: msg })
-    } catch (e) { logs.push(`✗ deploy parse error: ${e}`) }
+    } catch (e) {
+      const errMsg = `✗ deploy parse error: ${e}`
+      logs.push(errMsg)
+      await sdb().from('task_logs').insert({ task_id: taskId, type: 'error', content: errMsg })
+    }
   }
 
   // launch_ad blocks

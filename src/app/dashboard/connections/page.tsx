@@ -100,6 +100,24 @@ const SERVICES = [
     link: 'https://developers.facebook.com/apps/',
   },
   {
+    id: 'github',
+    name: 'GitHub',
+    icon: '',
+    color: '#8B5CF6',
+    description: 'Let agents create repos, push code, and manage your GitHub projects.',
+    fields: [
+      { key: 'token', label: 'Personal Access Token', placeholder: 'ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', secret: true },
+      { key: 'username', label: 'GitHub Username', placeholder: 'your-username', secret: false },
+    ],
+    guide: [
+      { step: 1, text: 'Go to github.com/settings/tokens → "Generate new token (classic)"' },
+      { step: 2, text: 'Give it a name like "IncursYIA Agent"' },
+      { step: 3, text: 'Select scopes: repo (full control), read:org' },
+      { step: 4, text: 'Copy the token (starts with ghp_) and paste below with your username' },
+    ],
+    link: 'https://github.com/settings/tokens',
+  },
+  {
     id: 'vercel',
     name: 'Vercel Deploy',
     icon: '',
