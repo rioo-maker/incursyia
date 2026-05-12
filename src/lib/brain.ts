@@ -152,6 +152,11 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
 
   const model = task.model ?? modelForTag(task.tag)
 
+  // Set agent to BUSY with current task
+  await sdb().from('agents')
+    .update({ status: 'busy', current_task: task.title })
+    .eq('type', task.tag)
+
   // Fetch which integrations this company has connected (RPC bypasses RLS)
   const integrations = await getCompanyIntegrations(task.company_id)
 
@@ -177,19 +182,29 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
     // Execute any action blocks the agent produced (emails, posts, ads)
     const actionLogs = await executeActions(result, task.company_id, taskId)
 
+    // Count how many actions actually fired
+    const actionsOk = actionLogs.filter(l => l.startsWith('✓')).length
+    const actionsFailed = actionLogs.filter(l => l.startsWith('✗')).length
+
+    await sdb().from('task_logs').insert({
+      task_id: taskId, type: 'info',
+      content: `Task done: ${actionsOk} actions executed, ${actionsFailed} failed. Total action blocks: ${actionLogs.length}`,
+    })
+
     await sdb().from('tasks').update({
       status: 'completed',
       completed_at: new Date().toISOString(),
       result: { output: result, actions_executed: actionLogs },
     }).eq('id', taskId)
 
-    await sdb().from('agents')
-      .update({ status: 'idle', last_active: new Date().toISOString() })
-      .eq('type', task.tag)
+    // Increment counters + set agent back to idle
+    await sdb().rpc('increment_agent_stats', { p_agent_type: task.tag, p_success: true })
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     await sdb().from('task_logs').insert({ task_id: taskId, type: 'error', content: msg })
     await sdb().from('tasks').update({ status: 'failed', error: msg }).eq('id', taskId)
+    // Set agent back to idle even on failure
+    await sdb().rpc('increment_agent_stats', { p_agent_type: task.tag, p_success: false })
   }
 }
