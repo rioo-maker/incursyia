@@ -9,16 +9,25 @@ function db() {
 
 /**
  * Fetch stored credentials for a service + company.
- * Used inside API routes (server-side only).
+ * Uses a SECURITY DEFINER RPC to bypass RLS — works even without service_role key.
  */
 export async function getCredentials(companyId: string, service: string): Promise<Record<string, string>> {
-  const { data } = await db()
-    .from('integrations')
-    .select('credentials')
-    .eq('company_id', companyId)
-    .eq('service', service)
-    .single()
-  return (data?.credentials as Record<string, string>) ?? {}
+  const { data } = await db().rpc('get_integration_credentials', {
+    p_company_id: companyId,
+    p_service: service,
+  })
+  return (data as Record<string, string>) ?? {}
+}
+
+/**
+ * Fetch all connected service names for a company.
+ * Uses a SECURITY DEFINER RPC to bypass RLS.
+ */
+export async function getCompanyIntegrations(companyId: string): Promise<string[]> {
+  const { data } = await db().rpc('get_company_integrations', {
+    p_company_id: companyId,
+  })
+  return (data as { service: string }[] ?? []).map(r => r.service)
 }
 
 /**

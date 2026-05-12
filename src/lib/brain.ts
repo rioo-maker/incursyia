@@ -1,5 +1,6 @@
 import { ollamaChatStream, ollamaChat, AGENT_MODELS, modelForTag, OllamaMessage } from './ollama'
 import { buildBrainSystemPrompt, buildAgentPrompt } from './prompts'
+import { getCompanyIntegrations } from './integrations'
 import { createClient } from '@supabase/supabase-js'
 
 function db() {
@@ -151,10 +152,8 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
 
   const model = task.model ?? modelForTag(task.tag)
 
-  // Fetch which integrations this company has connected
-  const { data: integrationRows } = await sdb()
-    .from('integrations').select('service').eq('company_id', task.company_id)
-  const integrations = (integrationRows ?? []).map((r: { service: string }) => r.service)
+  // Fetch which integrations this company has connected (RPC bypasses RLS)
+  const integrations = await getCompanyIntegrations(task.company_id)
 
   // Fetch company name
   const { data: company } = await sdb().from('companies').select('name').eq('id', task.company_id).single()
