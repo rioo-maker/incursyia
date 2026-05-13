@@ -1,6 +1,6 @@
 import { ollamaChatStream, ollamaChat, AGENT_MODELS, modelForTag, OllamaMessage } from './ollama'
 import { buildBrainSystemPrompt, buildAgentPrompt } from './prompts'
-import { getCompanyIntegrations } from './integrations'
+import { getCompanyIntegrations, getCredentials } from './integrations'
 import { createClient } from '@supabase/supabase-js'
 
 function db() {
@@ -72,11 +72,50 @@ export async function* streamBrainResponse(
   }
 }
 
+// ─── Deploy directly to Vercel (no HTTP round-trip) ─────────────────────────
+async function deployToVercel(
+  companyId: string, projectName: string, files: Record<string, string>, framework: string | null
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const creds = await getCredentials(companyId, 'vercel')
+    if (!creds.api_token) return { ok: false, error: 'Vercel not connected — add API token in Connections' }
+
+    const deployFiles = Object.entries(files).map(([filePath, content]) => ({
+      file: filePath,
+      data: Buffer.from(content).toString('base64'),
+      encoding: 'base64',
+    }))
+
+    const body: Record<string, unknown> = {
+      name: projectName ?? 'incursyia-project',
+      files: deployFiles,
+      projectSettings: { framework: framework ?? null },
+      target: 'production',
+    }
+
+    const url = creds.team_id
+      ? `https://api.vercel.com/v13/deployments?teamId=${creds.team_id}`
+      : 'https://api.vercel.com/v13/deployments'
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${creds.api_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+
+    if (!res.ok) return { ok: false, error: data.error?.message ?? JSON.stringify(data) }
+    return { ok: true, url: `https://${data.url}` }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
 // ─── Execute action blocks from agent output ──────────────────────────────────
 async function executeActions(result: string, companyId: string, taskId: string): Promise<string[]> {
   const logs: string[] = []
 
-  // Determine base URL for internal API calls
+  // Determine base URL for internal API calls (email, social, ads — NOT deploy)
   const base = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
     : (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000')
@@ -88,6 +127,10 @@ async function executeActions(result: string, companyId: string, taskId: string)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, company_id: companyId }),
       })
+      if (!res.ok) {
+        const text = await res.text()
+        try { return JSON.parse(text) } catch { return { error: `HTTP ${res.status}: ${text.substring(0, 200)}` } }
+      }
       return await res.json()
     } catch (e) { return { error: String(e) } }
   }
@@ -133,10 +176,10 @@ async function executeActions(result: string, companyId: string, taskId: string)
       for (const fb of fileBlocks) {
         files[fb[1].trim()] = fb[2]  // raw content, no JSON escaping issues
       }
-      const payload = { project_name: meta.project_name, files, framework: meta.framework ?? null }
       await sdb().from('task_logs').insert({ task_id: taskId, type: 'info', content: `Deploying ${Object.keys(files).length} files: ${Object.keys(files).join(', ')}` })
 
-      const r = await call('/api/deploy', payload)
+      // Call Vercel API directly — no HTTP round-trip to self
+      const r = await deployToVercel(companyId, meta.project_name, files, meta.framework ?? null)
       const msg = r.ok ? `✓ Deployed to ${r.url}` : `✗ Deploy failed: ${r.error}`
       logs.push(msg)
       await sdb().from('task_logs').insert({ task_id: taskId, type: r.ok ? 'action' : 'error', content: msg })
@@ -148,15 +191,17 @@ async function executeActions(result: string, companyId: string, taskId: string)
   }
 
   // ── Legacy single-block deploy format (fallback) ──
-  // ```deploy
-  // {"project_name":"x","files":{"index.html":"..."},"framework":null}
-  // ```
   if (!metaMatch) {
     for (const m of result.matchAll(/```deploy\s*([\s\S]*?)```/g)) {
       try {
-        let payload: Record<string, unknown>
+        let files: Record<string, string> = {}
+        let projectName = 'incursyia-project'
+        let framework: string | null = null
         try {
-          payload = JSON.parse(m[1].trim())
+          const payload = JSON.parse(m[1].trim())
+          files = payload.files ?? {}
+          projectName = payload.project_name ?? projectName
+          framework = payload.framework ?? null
         } catch {
           // Regex recovery for single-file HTML deploys
           const nameMatch = m[1].match(/"project_name"\s*:\s*"([^"]+)"/)
@@ -166,12 +211,14 @@ async function executeActions(result: string, companyId: string, taskId: string)
             let html = htmlMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
             const lastTag = html.lastIndexOf('</html>')
             if (lastTag !== -1) html = html.substring(0, lastTag + 7)
-            payload = { project_name: nameMatch[1], files: { 'index.html': html }, framework: null }
+            files = { 'index.html': html }
+            projectName = nameMatch[1]
           } else {
             throw new Error('Could not parse deploy JSON')
           }
         }
-        const r = await call('/api/deploy', payload)
+        // Call Vercel API directly — no HTTP round-trip to self
+        const r = await deployToVercel(companyId, projectName, files, framework)
         const msg = r.ok ? `✓ Deployed to ${r.url}` : `✗ Deploy failed: ${r.error}`
         logs.push(msg)
         await sdb().from('task_logs').insert({ task_id: taskId, type: r.ok ? 'action' : 'error', content: msg })
