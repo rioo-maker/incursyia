@@ -172,11 +172,24 @@ export default function ChatPage() {
           model: 'gpt-oss:120b', created_at: new Date().toISOString(),
         }])
 
-        // If the brain created tasks, run them immediately
+        // If the brain created tasks, run them — loop until all done
         if (full.includes('```tasks')) {
           setRunningTasks(true)
-          fetch('/api/tasks/auto-run', { method: 'POST' })
-            .finally(() => setRunningTasks(false))
+          const runBatch = async () => {
+            try {
+              const r = await fetch('/api/tasks/auto-run', { method: 'POST' })
+              const json = await r.json()
+              // If there are remaining tasks, keep running batches
+              if (json.remaining > 0) {
+                setTimeout(runBatch, 1000) // small pause between batches
+              } else {
+                setRunningTasks(false)
+              }
+            } catch {
+              setRunningTasks(false)
+            }
+          }
+          runBatch()
         }
       }
     } catch (err) {

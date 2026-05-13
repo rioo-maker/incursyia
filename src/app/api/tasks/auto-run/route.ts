@@ -16,8 +16,9 @@ function sdb() {
 
 /**
  * Called by the chat UI immediately after the brain responds.
- * Picks up any new `todo` tasks for this company and runs them.
- * Fire-and-forget from the client — runs up to maxDuration seconds.
+ * Picks up todo tasks for this company and runs them sequentially.
+ * Runs up to 3 tasks per invocation to stay within Vercel's 300s timeout.
+ * The chat UI can call this repeatedly, or the cron job sweeps remaining tasks.
  */
 export async function POST(req: NextRequest) {
   // Auth check
@@ -34,24 +35,36 @@ export async function POST(req: NextRequest) {
     .from('companies').select('id').eq('user_id', user.id).order('created_at').limit(1).single()
   if (!company) return NextResponse.json({ error: 'No company' }, { status: 404 })
 
-  // Get fresh todo tasks for this company (created in last 2 minutes = just created by chat)
-  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+  // Get ALL todo tasks — no time filter (the old 2-min window caused tasks to be stuck forever)
   const { data: tasks } = await sdb()
     .from('tasks')
     .select('id, title, tag')
     .eq('company_id', company.id)
     .eq('status', 'todo')
-    .gt('created_at', twoMinAgo)
     .order('created_at')
-    .limit(5)
+    .limit(3) // 3 tasks max per call (~90s each = ~270s total, within 300s limit)
 
-  if (!tasks?.length) return NextResponse.json({ ok: true, ran: 0 })
+  if (!tasks?.length) return NextResponse.json({ ok: true, ran: 0, remaining: 0 })
 
-  // Run all tasks in parallel — don't block on each one sequentially
-  const settled = await Promise.allSettled(tasks.map(task => runAgentTask(task.id)))
-  const results = settled.map((r, i) =>
-    r.status === 'fulfilled' ? `✓ ${tasks[i].title}` : `✗ ${tasks[i].title}: ${r.reason}`
-  )
+  // Count total remaining to inform client
+  const { count } = await sdb()
+    .from('tasks')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', company.id)
+    .eq('status', 'todo')
 
-  return NextResponse.json({ ok: true, ran: tasks.length, results })
+  // Run tasks sequentially — each Ollama call takes 30-90s
+  const results: string[] = []
+  for (const task of tasks) {
+    try {
+      await runAgentTask(task.id)
+      results.push(`✓ ${task.title}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      results.push(`✗ ${task.title}: ${msg}`)
+    }
+  }
+
+  const remaining = (count ?? 0) - tasks.length
+  return NextResponse.json({ ok: true, ran: tasks.length, remaining, results })
 }
