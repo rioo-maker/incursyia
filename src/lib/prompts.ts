@@ -176,17 +176,19 @@ console.log("ready");
 - You can deploy ANY number of files — HTML, CSS, JS, images, configs, etc.
 - Each file gets its own \`\`\`deploy-file:path/to/file\`\`\` block with RAW content (no escaping)
 - project_name: lowercase-with-hyphens (e.g. "riocorp-landing", "blog-seo")
-- framework: null for static sites, "nextjs" for Next.js projects (Vercel handles the build)
-- For Next.js: include package.json, pages/components, etc. — Vercel runs npm install + build
-- For static sites: just HTML/CSS/JS files
+- **ALWAYS use framework: null** — this means static HTML/CSS/JS files. NO build step, NO npm, NO errors.
 - NEVER use "..." or placeholder content — write the FULL complete file
 - If you don't output deploy-meta + deploy-file blocks, NOTHING gets deployed and you FAILED
 
-## WHAT TO BUILD
-- Simple landing pages, tools → single index.html with inline CSS/JS is fine
-- Blogs, multi-page sites → multiple HTML files or a Next.js project
-- Full apps → Next.js with package.json, framework: "nextjs"
-- Choose the right approach for the task — you have full flexibility`
+## CRITICAL: ALWAYS BUILD STATIC HTML SITES
+- **NEVER output framework: "nextjs"** — Next.js builds fail 90% of the time due to dependency/version issues
+- Build everything as static HTML + CSS + vanilla JS
+- For blogs: create index.html + one HTML file per article page (e.g. articles/first-post.html)
+- For multi-page sites: create multiple HTML files with links between them
+- Use modern CSS (flexbox, grid, variables) and vanilla JS — no frameworks, no npm, no build tools
+- The result must work by opening the HTML file directly — no server needed
+- Make the design beautiful, modern, responsive — use Google Fonts via CDN if needed
+- Static sites deploy INSTANTLY and NEVER fail. That is why you ALWAYS use them.`
   : `## Note: Vercel is NOT connected
 Write production-ready code, but deployment requires the user to add their Vercel API token in the Connections page.
 Include setup instructions with the code.`}
