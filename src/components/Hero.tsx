@@ -84,44 +84,65 @@ export function Hero({ onCTA, onDash }: HeroProps) {
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       justifyContent: 'center', textAlign: 'center',
       padding: '140px clamp(24px,5vw,72px) 0',
+      position: 'relative', overflow: 'hidden',
     }}>
-      <Reveal delay={0.05}>
-        <span style={{
-          fontFamily: 'var(--font-body)', fontSize: 12, fontWeight: 600,
-          color: 'var(--accent)', letterSpacing: '.14em', textTransform: 'uppercase',
-        }}>Autonomous AI Co-Founder</span>
-      </Reveal>
+      {/* Grid background */}
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 0,
+        backgroundImage:
+          'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
+        backgroundSize: '64px 64px',
+        maskImage: 'radial-gradient(ellipse 80% 70% at 50% 30%, black 20%, transparent 100%)',
+        WebkitMaskImage: 'radial-gradient(ellipse 80% 70% at 50% 30%, black 20%, transparent 100%)',
+      }} />
+      {/* Glow behind grid */}
+      <div style={{
+        position: 'absolute', top: '-10%', left: '50%', transform: 'translateX(-50%)',
+        width: '700px', height: '500px', zIndex: 0,
+        borderRadius: '50%',
+        background: 'radial-gradient(ellipse at center, rgba(217,119,87,0.12) 0%, rgba(217,119,87,0.04) 40%, transparent 70%)',
+        filter: 'blur(60px)',
+        pointerEvents: 'none',
+      }} />
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <Reveal delay={0.05}>
+          <span style={{
+            fontFamily: 'var(--font-body)', fontSize: 12, fontWeight: 600,
+            color: 'var(--accent)', letterSpacing: '.14em', textTransform: 'uppercase',
+          }}>Autonomous AI Co-Founder</span>
+        </Reveal>
 
-      <Reveal delay={0.15} style={{ marginTop: 28 }}>
-        <h1 style={{
-          fontFamily: 'var(--font-display)', fontStyle: 'italic',
-          fontSize: 'clamp(42px,7.5vw,88px)', fontWeight: 400,
-          color: 'var(--text-primary)', letterSpacing: '-0.025em',
-          lineHeight: 1.05, maxWidth: 900, margin: '0 auto',
-        }}>
-          The intelligence that moves<br/>your business forward
-        </h1>
-      </Reveal>
+        <Reveal delay={0.15} style={{ marginTop: 28 }}>
+          <h1 style={{
+            fontFamily: 'var(--font-display)', fontStyle: 'italic',
+            fontSize: 'clamp(42px,7.5vw,88px)', fontWeight: 400,
+            color: 'var(--text-primary)', letterSpacing: '-0.025em',
+            lineHeight: 1.05, maxWidth: 900, margin: '0 auto',
+          }}>
+            The intelligence that moves<br/>your business forward
+          </h1>
+        </Reveal>
 
-      <Reveal delay={0.3} style={{ marginTop: 32 }}>
-        <p style={{
-          fontFamily: 'var(--font-body)', fontSize: 'clamp(16px,1.8vw,19px)',
-          color: 'var(--text-secondary)', lineHeight: 1.7,
-          maxWidth: 520, margin: '0 auto',
-        }}>
-          It plans, builds, automates, publishes, analyzes and grows
-          your business — every day, without supervision.
-        </p>
-      </Reveal>
+        <Reveal delay={0.3} style={{ marginTop: 32 }}>
+          <p style={{
+            fontFamily: 'var(--font-body)', fontSize: 'clamp(16px,1.8vw,19px)',
+            color: 'var(--text-secondary)', lineHeight: 1.7,
+            maxWidth: 520, margin: '0 auto',
+          }}>
+            It plans, builds, automates, publishes, analyzes and grows
+            your business — every day, without supervision.
+          </p>
+        </Reveal>
 
-      <Reveal delay={0.45} style={{ marginTop: 48 }}>
-        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <AccentBtn large onClick={onCTA}>Start for free</AccentBtn>
-          <GhostBtn large onClick={onDash}>See the dashboard →</GhostBtn>
-        </div>
-      </Reveal>
+        <Reveal delay={0.45} style={{ marginTop: 48 }}>
+          <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <AccentBtn large onClick={onCTA}>Start for free</AccentBtn>
+            <GhostBtn large onClick={onDash}>See the dashboard →</GhostBtn>
+          </div>
+        </Reveal>
 
-      <Marquee />
+        <Marquee />
+      </div>
     </section>
   )
 }
