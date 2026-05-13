@@ -248,7 +248,11 @@ async function executeActions(result: string, companyId: string, taskId: string)
 
 // ─── Run a single agent task ──────────────────────────────────────────────────
 export async function runAgentTask(taskId: string, language = 'en'): Promise<void> {
-  const { data: task } = await sdb().from('tasks').select('*').eq('id', taskId).single()
+  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY
+  console.log(`[runAgentTask] taskId=${taskId} serviceKey=${hasServiceKey}`)
+
+  const { data: task, error: taskErr } = await sdb().from('tasks').select('*').eq('id', taskId).single()
+  console.log(`[runAgentTask] query result: found=${!!task} error=${taskErr?.message ?? 'none'}`)
   if (!task) return
 
   await sdb().from('tasks').update({ status: 'in_progress', started_at: new Date().toISOString() }).eq('id', taskId)
