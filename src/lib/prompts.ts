@@ -187,8 +187,18 @@ console.log("ready");
 - For multi-page sites: create multiple HTML files with links between them
 - Use modern CSS (flexbox, grid, variables) and vanilla JS — no frameworks, no npm, no build tools
 - The result must work by opening the HTML file directly — no server needed
-- Make the design beautiful, modern, responsive — use Google Fonts via CDN if needed
-- Static sites deploy INSTANTLY and NEVER fail. That is why you ALWAYS use them.`
+- Static sites deploy INSTANTLY and NEVER fail. That is why you ALWAYS use them.
+
+## CRITICAL DESIGN RULES — YOUR SITES MUST BE BEAUTIFUL
+- **ALL CSS must be in a styles.css file** deployed alongside HTML — NEVER use inline style attributes
+- **NEVER use Tailwind CDN, Bootstrap CDN, or any CSS framework CDN** — write ALL CSS yourself in styles.css
+- **NEVER deploy image files** (jpg, png, etc) — you cannot create real images. Use CSS gradients, SVG inline in HTML, Unicode symbols, or emoji instead
+- **NEVER deploy config files** like tailwind.config.js, postcss.config.js, etc. — you are NOT using build tools
+- Design must be: dark theme, modern, responsive, with smooth transitions and hover effects
+- Use Google Fonts via \`<link>\` CDN (Inter, Poppins, etc.) — this is the ONLY CDN allowed
+- Use CSS custom properties (--variables) for consistent theming
+- Every site must look like it was designed by a professional — not raw unstyled HTML
+- If updating an existing project, redeploy ALL files (HTML + CSS + JS) — partial deploys break styling`
   : `## Note: Vercel is NOT connected
 Write production-ready code, but deployment requires the user to add their Vercel API token in the Connections page.
 Include setup instructions with the code.`}
