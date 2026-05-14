@@ -86,10 +86,24 @@ async function deployToVercel(
       encoding: 'base64',
     }))
 
+    const resolvedFramework = framework ?? null
+
+    // PATCH existing project to update framework BEFORE deploying.
+    // Without this, projects first created with framework:"nextjs" force a
+    // Next.js build on every subsequent deploy, even when we send static files.
+    const patchUrl = creds.team_id
+      ? `https://api.vercel.com/v9/projects/${encodeURIComponent(projectName ?? 'incursyia-project')}?teamId=${creds.team_id}`
+      : `https://api.vercel.com/v9/projects/${encodeURIComponent(projectName ?? 'incursyia-project')}`
+    await fetch(patchUrl, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${creds.api_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ framework: resolvedFramework }),
+    }).catch(() => {}) // Ignore errors — project might not exist yet (will be created by deploy)
+
     const body: Record<string, unknown> = {
       name: projectName ?? 'incursyia-project',
       files: deployFiles,
-      projectSettings: { framework: framework ?? null },
+      projectSettings: { framework: resolvedFramework },
       target: 'production',
     }
 
@@ -248,11 +262,7 @@ async function executeActions(result: string, companyId: string, taskId: string)
 
 // ─── Run a single agent task ──────────────────────────────────────────────────
 export async function runAgentTask(taskId: string, language = 'en'): Promise<void> {
-  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY
-  console.log(`[runAgentTask] taskId=${taskId} serviceKey=${hasServiceKey}`)
-
-  const { data: task, error: taskErr } = await sdb().from('tasks').select('*').eq('id', taskId).single()
-  console.log(`[runAgentTask] query result: found=${!!task} error=${taskErr?.message ?? 'none'}`)
+  const { data: task } = await sdb().from('tasks').select('*').eq('id', taskId).single()
   if (!task) return
 
   await sdb().from('tasks').update({ status: 'in_progress', started_at: new Date().toISOString() }).eq('id', taskId)
