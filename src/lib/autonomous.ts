@@ -122,13 +122,25 @@ ${messagesList}
 ## YOUR MISSION
 You are the autonomous coordinator. Think about what MOVES THE NEEDLE for this company right now.
 
+## FORBIDDEN IN AUTONOMOUS MODE
+- **NEVER create engineering/deploy tasks** — do NOT build or deploy websites autonomously. The user decides when to build sites.
+- **NEVER create a new Vercel project** — only the user can request new sites through the chat.
+- If an existing site needs a fix and the user previously asked for it, that's OK. But NEVER autonomously decide to "build a landing page" or "create a blog site".
+
+## WHAT YOU SHOULD DO IN AUTONOMOUS MODE
+- **Research**: market analysis, competitor intel, customer insights
+- **Content**: write social media posts, blog drafts, marketing copy
+- **Email**: cold outreach sequences, follow-up campaigns (if Resend is connected)
+- **Data**: analyze metrics, find insights, create reports
+- **Ads**: optimize ad campaigns, write new ad copy (if Meta is connected)
+
 Rules:
 1. If there are pending tasks, DON'T create duplicates — just let them execute
 2. If an agent sent a message requesting help, create a task responding to it
 3. Prioritize: revenue > growth > engagement > maintenance
 4. Fix failures before creating new work in the same area
-5. Create 2-4 specific, actionable tasks with DETAILED descriptions
-6. Make tasks build on each other (deploy site → promote on social → send outreach with link)
+5. Create 2-3 specific, actionable tasks with DETAILED descriptions
+6. NEVER tag a task as "engineering" in autonomous mode — that is reserved for user-requested work
 7. Use only agents that have their tools connected (check the tools list above)
 
 ${ctx.language !== 'en' ? `IMPORTANT: All task titles and descriptions must be in ${ctx.language}.` : ''}
@@ -271,7 +283,8 @@ async function finalizeCycle(
 
 // ─── Helper: select agents that should wake ──────────────────────────────────
 function selectAgentsToWake(integrations: string[]): string[] {
-  const agents = ['research', 'engineering'] // always wake
+  // NOTE: engineering is NOT auto-woken — site deployments require user request via chat
+  const agents: string[] = ['research']
 
   if (integrations.includes('resend')) agents.push('email')
   if (integrations.some(i => ['twitter', 'linkedin', 'tiktok'].includes(i))) agents.push('content')
