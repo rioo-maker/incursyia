@@ -1,10 +1,10 @@
-import { ollamaChat, AGENT_MODELS, modelForTag, OllamaMessage } from './ollama'
-import { buildAgentPrompt, buildBrainSystemPrompt } from './prompts'
-import { getCompanyIntegrations, getCredentials } from './integrations'
+import { ollamaChat, AGENT_MODELS, modelForTag } from './ollama'
+import { buildBrainSystemPrompt } from './prompts'
+import { getCompanyIntegrations } from './integrations'
 import { createClient } from '@supabase/supabase-js'
 import { runAgentTask } from './brain'
 
-// ─── DB helpers ──────────────────────────────────────────────────────────────
+// ─── DB helper ───────────────────────────────────────────────────────────────
 function sdb() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,7 +13,6 @@ function sdb() {
 }
 
 const AGENT_TYPES = ['engineering', 'content', 'email', 'research', 'ads', 'data', 'support'] as const
-type AgentType = typeof AGENT_TYPES[number]
 
 interface WakeCycleResult {
   companyId: string
@@ -21,8 +20,7 @@ interface WakeCycleResult {
   cycleId: string
   tasksCreated: number
   tasksExecuted: number
-  messagesExchanged: number
-  agentReports: Record<string, string>
+  messagesRead: number
   errors: string[]
 }
 
@@ -30,202 +28,125 @@ interface WakeCycleResult {
 async function gatherCompanyContext(companyId: string) {
   const db = sdb()
 
-  // Parallel fetches for speed
-  const [
-    companyRes,
-    integrationsRes,
-    recentDoneRes,
-    recentFailedRes,
-    pendingTasksRes,
-    unreadMessagesRes,
-    profileRes,
-  ] = await Promise.all([
+  const [companyRes, recentDoneRes, recentFailedRes, pendingTasksRes, messagesRes] = await Promise.all([
     db.from('companies').select('name, description, industry, stage, user_id').eq('id', companyId).single(),
-    db.from('integrations').select('service, status').eq('company_id', companyId).eq('status', 'active'),
-    db.from('tasks').select('title, tag, result, completed_at')
+    db.from('tasks').select('title, tag, completed_at')
       .eq('company_id', companyId).eq('status', 'completed')
-      .order('completed_at', { ascending: false }).limit(10),
+      .order('completed_at', { ascending: false }).limit(8),
     db.from('tasks').select('title, tag, error')
       .eq('company_id', companyId).eq('status', 'failed')
-      .order('created_at', { ascending: false }).limit(5),
+      .order('created_at', { ascending: false }).limit(3),
     db.from('tasks').select('id, title, tag, priority')
       .eq('company_id', companyId).eq('status', 'todo')
       .order('created_at').limit(10),
-    db.from('agent_messages').select('from_agent, to_agent, content, created_at')
+    db.from('agent_messages').select('from_agent, to_agent, content')
       .eq('company_id', companyId).eq('read', false)
-      .order('created_at').limit(20),
-    db.from('companies').select('user_id').eq('id', companyId).single()
-      .then(async (res) => {
-        if (!res.data?.user_id) return { data: null }
-        return db.from('profiles').select('language, plan').eq('id', res.data.user_id).single()
-      }),
+      .order('created_at').limit(15),
   ])
 
   const company = companyRes.data
-  const integrations = (integrationsRes.data ?? []).map(r => r.service)
-  const recentDone = recentDoneRes.data ?? []
-  const recentFailed = recentFailedRes.data ?? []
-  const pendingTasks = pendingTasksRes.data ?? []
-  const unreadMessages = unreadMessagesRes.data ?? []
-  const profile = profileRes.data
+  const integrations = await getCompanyIntegrations(companyId)
+
+  // Fetch user profile for language/plan
+  let language = 'en', plan = 'free'
+  if (company?.user_id) {
+    const { data: profile } = await db.from('profiles').select('language, plan').eq('id', company.user_id).single()
+    language = profile?.language ?? 'en'
+    plan = profile?.plan ?? 'free'
+  }
 
   return {
-    company: company ?? { name: 'Unknown', description: '', industry: '', stage: '', user_id: '' },
+    company: company ?? { name: 'Unknown', description: '', industry: '', stage: '' },
     integrations,
-    recentDone,
-    recentFailed,
-    pendingTasks,
-    unreadMessages,
-    language: (profile as { language?: string })?.language ?? 'en',
-    plan: (profile as { plan?: string })?.plan ?? 'free',
+    recentDone: recentDoneRes.data ?? [],
+    recentFailed: recentFailedRes.data ?? [],
+    pendingTasks: pendingTasksRes.data ?? [],
+    unreadMessages: messagesRes.data ?? [],
+    language,
+    plan,
   }
 }
 
-// ─── 2. Agent self-assessment — what can I do right now? ─────────────────────
-function buildAgentWakePrompt(
-  agentType: AgentType,
-  companyName: string,
-  integrations: string[],
-  recentDone: { title: string; tag: string }[],
-  recentFailed: { title: string; tag: string; error: string | null }[],
-  messagesForMe: { from_agent: string; content: string }[],
+// ─── 2. Build the wake briefing prompt (single brain call) ───────────────────
+function buildWakeBriefingPrompt(ctx: {
+  companyName: string
+  description: string
+  industry: string
+  stage: string
+  integrations: string[]
+  recentDone: { title: string; tag: string }[]
+  recentFailed: { title: string; tag: string; error: string | null }[]
+  pendingTasks: { title: string; tag: string }[]
+  unreadMessages: { from_agent: string; to_agent: string; content: string }[]
   language: string
-): string {
-  const myRecent = recentDone.filter(t => t.tag === agentType)
-  const myFailed = recentFailed.filter(t => t.tag === agentType)
-  const incomingMsgs = messagesForMe.map(m => `[${m.from_agent}]: ${m.content}`).join('\n')
+}): string {
+  const doneList = ctx.recentDone.length > 0
+    ? ctx.recentDone.map(t => `- [${t.tag}] ${t.title}`).join('\n')
+    : 'Nothing completed yet.'
 
-  return `You are the ${agentType} agent for ${companyName}. You just woke up for your 2-hour autonomous cycle.
+  const failedList = ctx.recentFailed.length > 0
+    ? ctx.recentFailed.map(t => `- [${t.tag}] ${t.title}: ${t.error ?? 'unknown error'}`).join('\n')
+    : 'No failures.'
 
-## Your situation
-- Connected tools: ${integrations.length > 0 ? integrations.join(', ') : 'none yet'}
-- Your recent work: ${myRecent.length > 0 ? myRecent.map(t => t.title).join(', ') : 'nothing yet'}
-- Your recent failures: ${myFailed.length > 0 ? myFailed.map(t => `${t.title} (${t.error})`).join(', ') : 'none'}
+  const pendingList = ctx.pendingTasks.length > 0
+    ? ctx.pendingTasks.map(t => `- [${t.tag}] ${t.title}`).join('\n')
+    : 'Queue empty.'
 
-${incomingMsgs ? `## Messages from other agents\n${incomingMsgs}` : ''}
+  const messagesList = ctx.unreadMessages.length > 0
+    ? ctx.unreadMessages.map(m => `- ${m.from_agent} → ${m.to_agent}: ${m.content}`).join('\n')
+    : 'No messages.'
 
-## Your job
-1. Based on your role and the company context, propose 1-2 specific tasks you should do RIGHT NOW
-2. If another agent sent you a message, respond to it and incorporate it into your plan
-3. If you see an opportunity to help another agent, leave them a message
+  const toolsList = ctx.integrations.length > 0
+    ? ctx.integrations.join(', ')
+    : 'None connected — focus on research, strategy, content drafts.'
 
-Respond in this EXACT format:
+  return `## AUTONOMOUS WAKE CYCLE — ${ctx.companyName}
+This is an automated 2-hour wake cycle. No human is watching. You must decide what to do.
 
-\`\`\`wake_report
-{
-  "status": "ready",
-  "proposed_tasks": [
-    {"title": "...", "description": "Detailed instructions...", "priority": "high"}
-  ],
-  "messages_to_agents": [
-    {"to": "content", "message": "I deployed a new site at X, please promote it on social media"}
-  ]
-}
-\`\`\`
+**Company**: ${ctx.companyName} | ${ctx.industry ?? 'unknown industry'} | ${ctx.stage ?? 'early stage'}
+**Description**: ${ctx.description ?? 'No description set'}
+**Connected tools**: ${toolsList}
 
-${language !== 'en' ? `Respond in ${language}.` : ''}`
-}
+### Recently completed
+${doneList}
 
-// ─── 3. Coordinator — brain reviews all agent proposals and creates the plan ─
-function buildCoordinatorPrompt(
-  companyName: string,
-  integrations: string[],
-  agentProposals: Record<string, string>,
-  pendingTasks: { title: string; tag: string }[],
-  language: string
-): string {
-  const proposalsSummary = Object.entries(agentProposals)
-    .map(([agent, proposal]) => `### ${agent} agent\n${proposal}`)
-    .join('\n\n')
+### Recent failures (fix these or avoid repeating)
+${failedList}
 
-  const pendingList = pendingTasks.length > 0
-    ? `Already pending: ${pendingTasks.map(t => `${t.title} (${t.tag})`).join(', ')}`
-    : 'No pending tasks.'
-
-  return `You are the IncursYIA coordinator for ${companyName}. Your agents just woke up and proposed their plans.
-
-## Connected tools
-${integrations.length > 0 ? integrations.join(', ') : 'None — focus on content drafts, research, strategy.'}
-
-## Agent proposals
-${proposalsSummary}
-
-## Current task queue
+### Current pending tasks
 ${pendingList}
 
-## Your job
-1. Review all agent proposals
-2. Eliminate duplicates or conflicting work
-3. Prioritize: revenue-generating > growth > maintenance
-4. Create the final coordinated task list (max 4 tasks to stay within execution time)
-5. Make sure tasks build on each other (e.g. engineering deploys site THEN content promotes it)
+### Inter-agent messages (agents talking to each other)
+${messagesList}
 
-Output the final approved tasks:
+## YOUR MISSION
+You are the autonomous coordinator. Think about what MOVES THE NEEDLE for this company right now.
+
+Rules:
+1. If there are pending tasks, DON'T create duplicates — just let them execute
+2. If an agent sent a message requesting help, create a task responding to it
+3. Prioritize: revenue > growth > engagement > maintenance
+4. Fix failures before creating new work in the same area
+5. Create 2-4 specific, actionable tasks with DETAILED descriptions
+6. Make tasks build on each other (deploy site → promote on social → send outreach with link)
+7. Use only agents that have their tools connected (check the tools list above)
+
+${ctx.language !== 'en' ? `IMPORTANT: All task titles and descriptions must be in ${ctx.language}.` : ''}
+
+Output your plan:
 
 \`\`\`tasks
 [
-  {"title":"...", "tag":"engineering|content|email|research|ads|data|support", "priority":"critical|high|medium|low", "estimated_hours": 1, "description":"Detailed agent instructions..."}
+  {"title":"...", "tag":"engineering|content|email|research|ads|data|support", "priority":"critical|high|medium|low", "estimated_hours": 1, "description":"Detailed instructions for the agent. Be very specific about what to build/write/send."}
 ]
-\`\`\`
-
-${language !== 'en' ? `Respond in ${language}.` : ''}`
+\`\`\``
 }
 
-// ─── 4. Post inter-agent messages ────────────────────────────────────────────
-async function postAgentMessages(
-  companyId: string,
-  fromAgent: string,
-  messages: { to: string; message: string }[],
-  cycleId: string,
-  taskId?: string
-) {
-  const db = sdb()
-  for (const msg of messages) {
-    await db.from('agent_messages').insert({
-      company_id: companyId,
-      from_agent: fromAgent,
-      to_agent: msg.to,
-      content: msg.message,
-      task_id: taskId ?? null,
-      cycle_id: cycleId,
-    })
-  }
-  return messages.length
-}
-
-// ─── 5. Mark messages as read ────────────────────────────────────────────────
-async function markMessagesRead(companyId: string, agentType: string) {
-  await sdb().from('agent_messages')
-    .update({ read: true })
-    .eq('company_id', companyId)
-    .eq('to_agent', agentType)
-    .eq('read', false)
-}
-
-// ─── 6. Parse agent wake report ──────────────────────────────────────────────
-function parseWakeReport(output: string): {
-  proposedTasks: { title: string; description: string; priority: string }[]
-  messages: { to: string; message: string }[]
-} {
-  const match = output.match(/```wake_report\s*([\s\S]*?)```/)
-  if (!match) return { proposedTasks: [], messages: [] }
-  try {
-    const parsed = JSON.parse(match[1])
-    return {
-      proposedTasks: parsed.proposed_tasks ?? [],
-      messages: parsed.messages_to_agents ?? [],
-    }
-  } catch {
-    return { proposedTasks: [], messages: [] }
-  }
-}
-
-// ─── 7. THE MAIN WAKE CYCLE ─────────────────────────────────────────────────
+// ─── 3. THE MAIN WAKE CYCLE (optimized: 1 brain call + task execution) ───────
 export async function runWakeCycle(companyId: string): Promise<WakeCycleResult> {
   const db = sdb()
   const errors: string[] = []
-  const agentReports: Record<string, string> = {}
-  let messagesExchanged = 0
+  const startedAt = Date.now()
 
   // Create cycle record
   const { data: cycle } = await db.from('autonomous_runs').insert({
@@ -239,176 +160,129 @@ export async function runWakeCycle(companyId: string): Promise<WakeCycleResult> 
   const cycleId = cycle?.id ?? crypto.randomUUID()
 
   try {
-    // ── Phase 1: GATHER CONTEXT ─────────────────────────────────────────────
+    // ── Phase 1: GATHER CONTEXT (fast — just DB queries) ──────────────────
     const ctx = await gatherCompanyContext(companyId)
     const { company, integrations, recentDone, recentFailed, pendingTasks, unreadMessages, language, plan } = ctx
 
-    // If there are already many pending tasks, just execute them instead of planning more
-    if (pendingTasks.length >= 5) {
-      const ran = await executePendingTasks(companyId, 4)
-      await db.from('autonomous_runs').update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        tasks_run: ran,
-        summary: `Executed ${ran} pending tasks (queue was full, skipped planning)`,
-      }).eq('id', cycleId)
-
-      return {
-        companyId, companyName: company.name, cycleId,
-        tasksCreated: 0, tasksExecuted: ran, messagesExchanged: 0,
-        agentReports: { orchestrator: `Queue full — executed ${ran} tasks` }, errors,
-      }
-    }
-
-    // ── Phase 2: AGENT WAKE — each agent assesses what it can do ────────────
-    // Only wake agents that have relevant integrations or can work independently
+    // Set active agents to "waking"
     const agentsToWake = selectAgentsToWake(integrations)
-    const proposals: Record<string, string> = {}
-
-    for (const agentType of agentsToWake) {
-      try {
-        // Set agent to "waking"
-        await db.from('agents').update({ status: 'waking', last_active: new Date().toISOString() }).eq('type', agentType)
-
-        const myMessages = unreadMessages.filter(m => m.to_agent === agentType)
-        const prompt = buildAgentWakePrompt(
-          agentType, company.name, integrations,
-          recentDone as { title: string; tag: string }[],
-          recentFailed as { title: string; tag: string; error: string | null }[],
-          myMessages as { from_agent: string; content: string }[],
-          language
-        )
-
-        // Fast model for wake assessment (keep it quick)
-        const report = await ollamaChat(
-          [{ role: 'user', content: prompt }],
-          { model: AGENT_MODELS.fast, temperature: 0.6 }
-        )
-
-        proposals[agentType] = report
-        agentReports[agentType] = report.substring(0, 500)
-
-        // Parse and send any inter-agent messages
-        const parsed = parseWakeReport(report)
-        if (parsed.messages.length > 0) {
-          const sent = await postAgentMessages(companyId, agentType, parsed.messages, cycleId)
-          messagesExchanged += sent
-        }
-
-        // Mark my incoming messages as read
-        await markMessagesRead(companyId, agentType)
-
-        // Set agent back to idle
-        await db.from('agents').update({ status: 'idle' }).eq('type', agentType)
-
-      } catch (err) {
-        errors.push(`${agentType} wake failed: ${err instanceof Error ? err.message : String(err)}`)
-        await db.from('agents').update({ status: 'idle' }).eq('type', agentType)
-      }
+    for (const a of agentsToWake) {
+      await db.from('agents').update({ status: 'waking', last_active: new Date().toISOString() }).eq('type', a)
     }
 
-    // ── Phase 3: COORDINATOR — brain reviews proposals and creates plan ─────
+    // If too many pending tasks, skip planning and just execute
+    if (pendingTasks.length >= 5) {
+      const ran = await executePendingTasks(companyId, 3, startedAt)
+      await finalizeCycle(db, cycleId, 0, ran, `Executed ${ran} pending tasks (queue was full)`, agentsToWake)
+      return { companyId, companyName: company.name, cycleId, tasksCreated: 0, tasksExecuted: ran, messagesRead: 0, errors }
+    }
+
+    // ── Phase 2: SINGLE BRAIN CALL — plan everything at once (~60-90s) ────
     let tasksCreated = 0
+    const messagesRead = unreadMessages.length
 
-    if (Object.keys(proposals).length > 0) {
-      try {
-        const coordPrompt = buildCoordinatorPrompt(
-          company.name, integrations, proposals,
-          pendingTasks as { title: string; tag: string }[],
-          language
-        )
+    try {
+      const briefingPrompt = buildWakeBriefingPrompt({
+        companyName: company.name,
+        description: company.description ?? '',
+        industry: company.industry ?? '',
+        stage: company.stage ?? '',
+        integrations,
+        recentDone: recentDone as { title: string; tag: string }[],
+        recentFailed: recentFailed as { title: string; tag: string; error: string | null }[],
+        pendingTasks: pendingTasks as { title: string; tag: string }[],
+        unreadMessages: unreadMessages as { from_agent: string; to_agent: string; content: string }[],
+        language,
+      })
 
-        const coordResponse = await ollamaChat(
-          [{ role: 'user', content: coordPrompt }],
-          { model: AGENT_MODELS.brain, system: buildBrainSystemPrompt(language, company.name, plan) }
-        )
+      const response = await ollamaChat(
+        [{ role: 'user', content: briefingPrompt }],
+        { model: AGENT_MODELS.brain, system: buildBrainSystemPrompt(language, company.name, plan) }
+      )
 
-        agentReports['coordinator'] = coordResponse.substring(0, 500)
-
-        // Parse tasks from coordinator response
-        const tasksMatch = coordResponse.match(/```tasks\s*([\s\S]*?)```/)
-        if (tasksMatch) {
-          const taskList = JSON.parse(tasksMatch[1])
-          for (const t of taskList) {
-            const tag = t.tag ?? 'general'
-            await db.from('tasks').insert({
-              company_id: companyId,
-              title: t.title,
-              description: t.description,
-              tag,
-              priority: t.priority ?? 'high',
-              estimated_hours: t.estimated_hours ?? 1,
-              model: modelForTag(tag),
-              status: 'todo',
-              metadata: { cycle_id: cycleId, source: 'autonomous' },
-            })
-            tasksCreated++
-          }
+      // Parse and create tasks
+      const tasksMatch = response.match(/```tasks\s*([\s\S]*?)```/)
+      if (tasksMatch) {
+        const taskList = JSON.parse(tasksMatch[1])
+        for (const t of taskList) {
+          const tag = t.tag ?? 'research'
+          await db.from('tasks').insert({
+            company_id: companyId,
+            title: t.title,
+            description: t.description,
+            tag,
+            priority: t.priority ?? 'high',
+            estimated_hours: t.estimated_hours ?? 1,
+            model: modelForTag(tag),
+            status: 'todo',
+            metadata: { cycle_id: cycleId, source: 'autonomous' },
+          })
+          tasksCreated++
         }
-      } catch (err) {
-        errors.push(`Coordinator failed: ${err instanceof Error ? err.message : String(err)}`)
       }
+
+      // Mark all inter-agent messages as read
+      if (unreadMessages.length > 0) {
+        await db.from('agent_messages').update({ read: true })
+          .eq('company_id', companyId).eq('read', false)
+      }
+
+    } catch (err) {
+      errors.push(`Brain planning failed: ${err instanceof Error ? err.message : String(err)}`)
     }
 
-    // ── Phase 4: EXECUTE — run tasks (pending + newly created) ──────────────
-    const tasksExecuted = await executePendingTasks(companyId, 3)
+    // ── Phase 3: EXECUTE — run tasks in remaining time (~120-180s left) ───
+    const tasksExecuted = await executePendingTasks(companyId, 2, startedAt)
 
-    // ── Phase 5: SLEEP — log everything ─────────────────────────────────────
-    await db.from('autonomous_runs').update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      tasks_created: tasksCreated,
-      tasks_run: tasksExecuted,
-      summary: `Woke ${agentsToWake.length} agents, created ${tasksCreated} tasks, executed ${tasksExecuted}, ${messagesExchanged} inter-agent messages`,
-      agent_reports: agentReports,
-    }).eq('id', cycleId)
+    // ── Phase 4: SLEEP ────────────────────────────────────────────────────
+    const summary = `Woke ${agentsToWake.length} agents, planned ${tasksCreated} tasks, executed ${tasksExecuted}, read ${messagesRead} messages`
+    await finalizeCycle(db, cycleId, tasksCreated, tasksExecuted, summary, agentsToWake)
 
-    // Set all agents back to sleeping
-    for (const agentType of agentsToWake) {
-      await db.from('agents').update({ status: 'sleeping', last_active: new Date().toISOString() }).eq('type', agentType)
-    }
-
-    return {
-      companyId, companyName: company.name, cycleId,
-      tasksCreated, tasksExecuted, messagesExchanged,
-      agentReports, errors,
-    }
+    return { companyId, companyName: company.name, cycleId, tasksCreated, tasksExecuted, messagesRead, errors }
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     errors.push(`Fatal: ${msg}`)
     await db.from('autonomous_runs').update({
-      status: 'failed',
-      completed_at: new Date().toISOString(),
-      summary: `Fatal error: ${msg}`,
+      status: 'failed', completed_at: new Date().toISOString(), summary: `Fatal: ${msg}`,
     }).eq('id', cycleId)
-
-    return {
-      companyId, companyName: 'unknown', cycleId,
-      tasksCreated: 0, tasksExecuted: 0, messagesExchanged: 0,
-      agentReports, errors,
-    }
+    return { companyId, companyName: 'unknown', cycleId, tasksCreated: 0, tasksExecuted: 0, messagesRead: 0, errors }
   }
 }
 
-// ─── Helper: decide which agents to wake based on integrations ───────────────
-function selectAgentsToWake(integrations: string[]): AgentType[] {
-  // Always wake these (they can work without integrations)
-  const agents: AgentType[] = ['research', 'engineering']
+// ─── Helper: finalize cycle and set agents to sleeping ───────────────────────
+async function finalizeCycle(
+  db: ReturnType<typeof sdb>, cycleId: string,
+  tasksCreated: number, tasksRun: number, summary: string,
+  agentsToSleep: string[]
+) {
+  await db.from('autonomous_runs').update({
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+    tasks_created: tasksCreated,
+    tasks_run: tasksRun,
+    summary,
+  }).eq('id', cycleId)
 
-  // Wake agents that have their tools connected
+  for (const a of agentsToSleep) {
+    await db.from('agents').update({ status: 'sleeping', last_active: new Date().toISOString() }).eq('type', a)
+  }
+}
+
+// ─── Helper: select agents that should wake ──────────────────────────────────
+function selectAgentsToWake(integrations: string[]): string[] {
+  const agents = ['research', 'engineering'] // always wake
+
   if (integrations.includes('resend')) agents.push('email')
   if (integrations.some(i => ['twitter', 'linkedin', 'tiktok'].includes(i))) agents.push('content')
   if (integrations.includes('meta')) agents.push('ads')
-
-  // Data and support are useful when there's activity
   agents.push('data')
 
-  return [...new Set(agents)] // dedupe
+  return [...new Set(agents)]
 }
 
-// ─── Helper: execute pending tasks up to a limit ─────────────────────────────
-async function executePendingTasks(companyId: string, limit: number): Promise<number> {
+// ─── Helper: execute pending tasks with time guard ───────────────────────────
+async function executePendingTasks(companyId: string, limit: number, startedAt: number): Promise<number> {
   const db = sdb()
   const { data: tasks } = await db.from('tasks')
     .select('id, title, tag')
@@ -421,12 +295,14 @@ async function executePendingTasks(companyId: string, limit: number): Promise<nu
 
   let ran = 0
   for (const task of tasks) {
+    // Stop if we're approaching the 300s Vercel timeout (leave 30s buffer)
+    if (Date.now() - startedAt > 270_000) break
+
     try {
       await runAgentTask(task.id)
       ran++
-    } catch (err) {
-      // Task failure is already handled inside runAgentTask
-      ran++
+    } catch {
+      ran++ // counted even if failed (runAgentTask handles the failure internally)
     }
   }
   return ran
@@ -439,7 +315,6 @@ export async function extractAgentMessages(
   fromAgent: string,
   taskId: string,
 ): Promise<number> {
-  // Look for ```agent_message blocks in agent output
   const msgBlocks = [...taskOutput.matchAll(/```agent_message\s*([\s\S]*?)```/g)]
   let count = 0
 

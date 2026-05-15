@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
           company: cycleResult.companyName,
           tasksCreated: cycleResult.tasksCreated,
           tasksExecuted: cycleResult.tasksExecuted,
-          messages: cycleResult.messagesExchanged,
+          messages: cycleResult.messagesRead,
           errors: cycleResult.errors,
         })
       } catch (err) {
