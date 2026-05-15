@@ -1,16 +1,16 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { runAgentTask } from '@/lib/brain'
-import { ollamaChat, AGENT_MODELS, modelForTag } from '@/lib/ollama'
-import { buildBrainSystemPrompt } from '@/lib/prompts'
+import { runWakeCycle } from '@/lib/autonomous'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
-export const schedule = '0 0 * * *' // Daily at midnight UTC
+
+// ── Every 2 hours: agents wake up, coordinate, act, sleep ───────────────────
+export const schedule = '0 */2 * * *'
 
 const CRON_SECRET = process.env.CRON_SECRET ?? ''
 
-function db() {
+function sdb() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -18,133 +18,111 @@ function db() {
 }
 
 export async function GET(req: NextRequest) {
+  // Auth — Vercel cron sends the CRON_SECRET header
   const auth = req.headers.get('authorization')
   if (CRON_SECRET && auth !== `Bearer ${CRON_SECRET}`) {
     return new Response('Unauthorized', { status: 401 })
   }
 
-  const results: string[] = []
-  const startedAt = new Date().toISOString()
+  const startedAt = Date.now()
+  const results: {
+    company: string
+    tasksCreated: number
+    tasksExecuted: number
+    messages: number
+    errors: string[]
+  }[] = []
 
   try {
-    // ── 1. Unstick crashed in_progress tasks (>30 min old) ───────────────────
+    // ── 1. Unstick crashed tasks (>30 min in_progress) ────────────────────
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
-    const { data: stuckTasks } = await db()
+    const { data: stuckTasks } = await sdb()
       .from('tasks').select('id, title')
       .eq('status', 'in_progress').lt('started_at', thirtyMinAgo)
 
     for (const task of stuckTasks ?? []) {
-      await db().from('tasks').update({ status: 'failed', error: 'Timed out — will retry next cycle' }).eq('id', task.id)
-      results.push(`Reset stuck task: ${task.title}`)
+      await sdb().from('tasks').update({
+        status: 'todo', error: null, started_at: null,
+      }).eq('id', task.id)
     }
 
-    // ── 2. Retry up to 2 failed tasks ────────────────────────────────────────
-    const { data: failedTasks } = await db()
-      .from('tasks').select('id, tag, title, company_id')
-      .eq('status', 'failed').order('created_at').limit(2)
+    // ── 2. Get all companies with active users ────────────────────────────
+    const { data: companies } = await sdb()
+      .from('companies')
+      .select('id, name')
+      .limit(20) // safety cap
 
-    for (const task of failedTasks ?? []) {
-      try {
-        await db().from('tasks').update({ status: 'todo', error: null }).eq('id', task.id)
-        await runAgentTask(task.id)
-        results.push(`Retried: ${task.title}`)
-      } catch (e) { results.push(`Retry failed ${task.id}: ${e}`) }
+    if (!companies?.length) {
+      return Response.json({ ok: true, message: 'No companies found', results: [] })
     }
 
-    // ── 3. Run up to 5 pending tasks ─────────────────────────────────────────
-    const { data: pendingTasks } = await db()
-      .from('tasks').select('id, tag, title, company_id')
-      .eq('status', 'todo').order('created_at').limit(5)
+    // ── 3. Throttle: skip companies that ran within 90 min ────────────────
+    const ninetyMinAgo = new Date(Date.now() - 90 * 60 * 1000).toISOString()
 
-    for (const task of pendingTasks ?? []) {
+    for (const company of companies) {
+      // Check time limit — Vercel kills at 300s, stop at 240s to be safe
+      if (Date.now() - startedAt > 240_000) {
+        results.push({
+          company: company.name,
+          tasksCreated: 0, tasksExecuted: 0, messages: 0,
+          errors: ['Skipped — approaching time limit'],
+        })
+        continue
+      }
+
+      // Throttle check
+      const { data: lastRun } = await sdb()
+        .from('autonomous_runs')
+        .select('created_at')
+        .eq('company_id', company.id)
+        .gte('created_at', ninetyMinAgo)
+        .limit(1)
+        .single()
+
+      if (lastRun) {
+        results.push({
+          company: company.name,
+          tasksCreated: 0, tasksExecuted: 0, messages: 0,
+          errors: ['Skipped — ran recently'],
+        })
+        continue
+      }
+
+      // ── 4. Run the full wake cycle for this company ───────────────────
       try {
-        await runAgentTask(task.id)
-        results.push(`Ran: ${task.title} (${task.tag})`)
-      } catch (e) { results.push(`Failed ${task.id}: ${e}`) }
-    }
-
-    // ── 4. Generate new tasks for idle companies ──────────────────────────────
-    const { data: companies } = await db()
-      .from('companies').select('id, name, description, industry, stage, user_id').limit(20)
-
-    for (const company of companies ?? []) {
-      const { count } = await db().from('tasks')
-        .select('id', { count: 'exact', head: true })
-        .eq('company_id', company.id).in('status', ['todo', 'in_progress'])
-      if ((count ?? 0) > 0) continue
-
-      // Throttle to once per hour
-      const { data: lastRun } = await db().from('autonomous_runs')
-        .select('started_at').eq('company_id', company.id)
-        .order('started_at', { ascending: false }).limit(1).single()
-      if (lastRun && new Date(lastRun.started_at) > new Date(Date.now() - 3600000)) continue
-
-      const { data: run } = await db().from('autonomous_runs')
-        .insert({ company_id: company.id, status: 'running', started_at: startedAt })
-        .select().single()
-
-      try {
-        const { data: profile } = await db()
-          .from('profiles').select('language, plan').eq('id', company.user_id).single()
-        const language = profile?.language ?? 'en'
-        const plan = profile?.plan ?? 'free'
-
-        // What integrations does this company have?
-        const { data: integrationRows } = await db()
-          .from('integrations').select('service').eq('company_id', company.id)
-        const integrations = (integrationRows ?? []).map((r: { service: string }) => r.service)
-
-        // What was recently done?
-        const { data: recentDone } = await db()
-          .from('tasks').select('title, tag').eq('company_id', company.id)
-          .eq('status', 'completed').order('completed_at', { ascending: false }).limit(5)
-        const doneContext = recentDone?.length
-          ? `Recently completed:\n${recentDone.map(t => `- ${t.title} (${t.tag})`).join('\n')}`
-          : 'No tasks done yet.'
-
-        const toolsContext = integrations.length
-          ? `Connected tools: ${integrations.join(', ')}. Agents can send real emails, post real content, launch real ads. Prioritize tasks that USE these tools.`
-          : 'No integrations connected. Focus on research, strategy, content drafts.'
-
-        const prompt = `Autonomous run for ${company.name}.
-Company: ${company.name} | Industry: ${company.industry ?? 'unknown'} | Stage: ${company.stage ?? 'early'}
-Description: ${company.description ?? 'No description'}
-
-${doneContext}
-${toolsContext}
-
-Generate 2-3 specific high-leverage tasks. For each task, write detailed instructions in the description so the agent knows exactly what to do and what action blocks to output.`
-
-        const response = await ollamaChat(
-          [{ role: 'user', content: prompt }],
-          { model: AGENT_MODELS.fast, system: buildBrainSystemPrompt(language, company.name, plan) }
-        )
-
-        const match = response.match(/```tasks\s*([\s\S]*?)```/)
-        if (match) {
-          const taskList = JSON.parse(match[1])
-          for (const t of taskList) {
-            const tag = t.tag ?? 'research'
-            await db().from('tasks').insert({
-              company_id: company.id, title: t.title, description: t.description,
-              tag, priority: t.priority ?? 'high',
-              estimated_hours: t.estimated_hours ?? 1,
-              model: modelForTag(tag), status: 'todo',
-            })
-          }
-          results.push(`Generated ${taskList.length} tasks for ${company.name}`)
-        }
-
-        if (run) await db().from('autonomous_runs')
-          .update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', run.id)
-
-      } catch (e) {
-        results.push(`Brain failed for ${company.name}: ${e}`)
-        if (run) await db().from('autonomous_runs').update({ status: 'failed' }).eq('id', run.id)
+        const cycleResult = await runWakeCycle(company.id)
+        results.push({
+          company: cycleResult.companyName,
+          tasksCreated: cycleResult.tasksCreated,
+          tasksExecuted: cycleResult.tasksExecuted,
+          messages: cycleResult.messagesExchanged,
+          errors: cycleResult.errors,
+        })
+      } catch (err) {
+        results.push({
+          company: company.name,
+          tasksCreated: 0, tasksExecuted: 0, messages: 0,
+          errors: [err instanceof Error ? err.message : String(err)],
+        })
       }
     }
 
-    return Response.json({ ok: true, ran_at: startedAt, results })
+    const elapsed = Math.round((Date.now() - startedAt) / 1000)
+    const totalTasks = results.reduce((s, r) => s + r.tasksCreated, 0)
+    const totalRan = results.reduce((s, r) => s + r.tasksExecuted, 0)
+    const totalMsgs = results.reduce((s, r) => s + r.messages, 0)
+
+    return Response.json({
+      ok: true,
+      elapsed_seconds: elapsed,
+      companies_processed: results.filter(r => !r.errors.includes('Skipped — ran recently')).length,
+      total_tasks_created: totalTasks,
+      total_tasks_executed: totalRan,
+      total_agent_messages: totalMsgs,
+      stuck_tasks_reset: stuckTasks?.length ?? 0,
+      results,
+    })
+
   } catch (err) {
     return Response.json({ ok: false, error: String(err) }, { status: 500 })
   }

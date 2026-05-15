@@ -1,6 +1,7 @@
 import { ollamaChatStream, ollamaChat, AGENT_MODELS, modelForTag, OllamaMessage } from './ollama'
 import { buildBrainSystemPrompt, buildAgentPrompt } from './prompts'
 import { getCompanyIntegrations, getCredentials } from './integrations'
+import { extractAgentMessages } from './autonomous'
 import { createClient } from '@supabase/supabase-js'
 
 function db() {
@@ -313,6 +314,9 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
       completed_at: new Date().toISOString(),
       result: { output: result, actions_executed: actionLogs },
     }).eq('id', taskId)
+
+    // Extract inter-agent messages from output (e.g. ```agent_message blocks)
+    await extractAgentMessages(result, task.company_id, task.tag, taskId)
 
     // Increment counters + set agent back to idle
     await sdb().rpc('increment_agent_stats', { p_agent_type: task.tag, p_success: true })

@@ -101,6 +101,14 @@ To deploy a website (requires Vercel connected):
 <html>full HTML here</html>
 \`\`\`
 
+To send a message to another agent (they will see it on their next wake cycle):
+\`\`\`agent_message
+{"to": "content", "message": "I just deployed the new landing page at https://example.vercel.app — please create social media posts promoting it"}
+\`\`\`
+
+Available agents you can message: email, content, ads, engineering, research, data, support.
+Use this when your work creates an opportunity for another agent (e.g. new site → content should promote it, new feature → email should notify users).
+
 Always include action blocks when you have real work to execute. The system will fire them automatically.`
 
   const agents: Record<string, string> = {
