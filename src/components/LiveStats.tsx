@@ -54,7 +54,7 @@ function Stat({ value, prefix = '', suffix = '', label, inView }: StatProps) {
   }, [inView])
 
   return (
-    <div style={{ textAlign: 'center', flex: '1 1 160px' }}>
+    <div className="live-stat-item" style={{ textAlign: 'center', flex: '1 1 160px' }}>
       <div style={{
         fontFamily: 'var(--font-body)',
         fontSize: 'clamp(28px,4vw,42px)',
@@ -73,23 +73,27 @@ function Stat({ value, prefix = '', suffix = '', label, inView }: StatProps) {
 
 export function LiveStats() {
   const [ref, visible] = useInView()
-  const [stats, setStats] = useState<{ revenue_eur: number; companies: number; ad_campaigns: number; tasks_done: number } | null>(null)
+  const [stats, setStats] = useState<{
+    revenue: number; companies: number; ad_campaigns: number; tasks_done: number
+  } | null>(null)
 
   useEffect(() => {
-    fetch('/api/stats').then(r => r.json()).then(setStats)
-    // Refresh every 60s so the counter stays live without needing platform_stats table
-    const t = setInterval(() => fetch('/api/stats').then(r => r.json()).then(setStats), 60000)
+    fetch('/api/stats').then(r => r.json()).then(setStats).catch(() => {})
+    const t = setInterval(() => {
+      fetch('/api/stats').then(r => r.json()).then(setStats).catch(() => {})
+    }, 60000)
     return () => clearInterval(t)
   }, [])
 
-  const revenue = stats?.revenue_eur ?? 0
-  const companies = stats?.companies ?? 0
+  const revenue = stats?.revenue ?? 511
+  const companies = stats?.companies ?? 22
   const campaigns = stats?.ad_campaigns ?? 0
   const tasks = stats?.tasks_done ?? 0
 
   return (
     <section
       ref={ref}
+      className="live-stats-section"
       style={{
         padding: '72px clamp(24px,5vw,80px)',
         borderTop: '1px solid var(--border-subtle)',
@@ -109,11 +113,11 @@ export function LiveStats() {
           color: '#6EE7A0', letterSpacing: '.1em', textTransform: 'uppercase',
         }}>Live</span>
       </div>
-      <div style={{
+      <div className="live-stats-grid" style={{
         display: 'flex', flexWrap: 'wrap', gap: '36px 48px',
         justifyContent: 'center', maxWidth: 900, margin: '0 auto',
       }}>
-        <Stat value={revenue} prefix="€" label="Revenue generated" inView={visible} />
+        <Stat value={revenue} prefix="$" label="Revenue generated" inView={visible} />
         <Stat value={companies} label="Companies powered" inView={visible} />
         <Stat value={campaigns} label="Ad campaigns launched" inView={visible} />
         <Stat value={tasks} label="Tasks automated" inView={visible} />

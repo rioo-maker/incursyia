@@ -135,7 +135,7 @@ export function Hero({ onCTA, onDash }: HeroProps) {
         </Reveal>
 
         <Reveal delay={0.45} style={{ marginTop: 48 }}>
-          <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div className="hero-buttons" style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
             <AccentBtn large onClick={onCTA}>Start for free</AccentBtn>
             <GhostBtn large onClick={onDash}>See the dashboard →</GhostBtn>
           </div>
@@ -153,7 +153,7 @@ export function HeroSplit({ onCTA, onDash }: HeroProps) {
       minHeight: '100vh', display: 'flex', alignItems: 'center',
       padding: '140px clamp(24px,5vw,80px) 80px',
     }}>
-      <div style={{
+      <div className="hero-split-grid" style={{
         display: 'grid', gridTemplateColumns: '1fr 1fr',
         gap: 'clamp(40px,6vw,80px)', alignItems: 'center',
         maxWidth: 1120, margin: '0 auto', width: '100%',

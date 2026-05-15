@@ -70,3 +70,101 @@ body::after {
   from { opacity: 0; transform: translateY(20px) scale(.98); }
   to   { opacity: 1; transform: none; }
 }
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ─── Mobile responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* Nav: show hamburger, hide desktop links & CTA */
+  .nav-links { display: none !important; }
+  .nav-cta-desktop { display: none !important; }
+  .nav-hamburger { display: flex !important; }
+
+  /* Hero: tighter padding, smaller min-height */
+  section:first-of-type {
+    min-height: auto !important;
+    padding-top: 100px !important;
+    padding-bottom: 60px !important;
+  }
+
+  /* Hero buttons: stack vertically, full width */
+  .hero-buttons {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 0 12px;
+  }
+  .hero-buttons .accent-btn,
+  .hero-buttons button {
+    width: 100% !important;
+    text-align: center;
+  }
+
+  /* Hero split: single column */
+  .hero-split-grid {
+    grid-template-columns: 1fr !important;
+    text-align: center;
+  }
+
+  /* Live Stats: 2x2 grid on mobile */
+  .live-stats-section {
+    padding: 48px 20px !important;
+  }
+  .live-stats-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 28px 16px !important;
+  }
+  .live-stat-item {
+    flex: none !important;
+  }
+
+  /* Sections: reduce padding on mobile */
+  #features,
+  #how-it-works,
+  #faq {
+    padding: 72px 20px !important;
+  }
+
+  /* FAQ items: make touch-friendly */
+  #faq button {
+    font-size: 17px !important;
+    padding: 22px 0 !important;
+  }
+
+  /* CTA section */
+  section:has(.accent-btn):last-of-type {
+    padding: 80px 20px !important;
+  }
+
+  /* Footer: stack columns */
+  footer {
+    padding: 48px 20px 28px !important;
+  }
+  footer > div:first-child {
+    flex-direction: column !important;
+    gap: 32px !important;
+  }
+}
+
+/* Small phones */
+@media (max-width: 420px) {
+  .live-stats-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 24px 8px !important;
+  }
+
+  .hero-buttons {
+    padding: 0 4px;
+  }
+
+  /* Smaller section headings */
+  #features h2,
+  #how-it-works h2,
+  #faq h2 {
+    font-size: clamp(26px, 7vw, 36px) !important;
+  }
+}
