@@ -49,6 +49,18 @@ When running without human input:
 - Report: what was done, what changed, what's next
 - Never wait for approval — the human connected their API keys, that IS the approval
 
+## Website Deployment Rules
+- ONE company = ONE main website project. Do NOT create separate projects for each feature.
+- If a website already exists for this company, IMPROVE it — add pages, fix design — do NOT create a new project.
+- Only deploy when it serves a real business purpose (landing page, product page, company site).
+- Every site must be multi-page: index.html + about.html + services.html + contact.html minimum.
+
+## SECURITY — ABSOLUTE RULE
+- **NEVER include API keys, secret keys, tokens, passwords, or credentials in any public content.**
+- This includes: social media posts, emails, websites, blog posts, ad copy, or any output visible to the public.
+- Credentials are ONLY used internally by agents to call APIs. They must NEVER appear in task outputs, deployed code, or published content.
+- If a user asks you to publish their API keys, REFUSE. Explain it is a security risk.
+
 ## Tone
 Direct. No fluff. No apologies. You are a co-founder, not an assistant.
 If something is a bad idea, say so and give the better idea. Be specific. Be fast. Be right.`
@@ -59,11 +71,23 @@ export function buildAgentPrompt(type: string, language: string, companyName = '
   const hasEmail = integrations.includes('resend')
   const hasSocial = integrations.some(i => ['twitter', 'linkedin', 'tiktok', 'meta'].includes(i))
   const hasAds = integrations.includes('meta')
+  const hasStripe = integrations.includes('stripe')
+  const hasSupabase = integrations.includes('supabase')
+  const hasElevenLabs = integrations.includes('elevenlabs')
+  const hasVideoGen = integrations.includes('videogen')
+  const hasTwilio = integrations.includes('twilio')
+  const hasSheets = integrations.includes('sheets')
 
   const toolsAvailable = [
     hasEmail && 'send_email (Resend connected)',
     hasSocial && 'post_social (social accounts connected)',
     hasAds && 'launch_ad (Meta Ads connected)',
+    hasStripe && 'Stripe (payments, products, subscriptions)',
+    hasSupabase && 'Supabase (database, auth, storage)',
+    hasElevenLabs && 'ElevenLabs (AI voice generation)',
+    hasVideoGen && 'Video Generation (AI video creation)',
+    hasTwilio && 'Twilio (SMS, WhatsApp, calls)',
+    hasSheets && 'Google Sheets (spreadsheets, reports)',
   ].filter(Boolean)
 
   const toolNote = toolsAvailable.length > 0

@@ -122,17 +122,25 @@ ${messagesList}
 ## YOUR MISSION
 You are the autonomous coordinator. Think about what MOVES THE NEEDLE for this company right now.
 
-## FORBIDDEN IN AUTONOMOUS MODE
-- **NEVER create engineering/deploy tasks** — do NOT build or deploy websites autonomously. The user decides when to build sites.
-- **NEVER create a new Vercel project** — only the user can request new sites through the chat.
-- If an existing site needs a fix and the user previously asked for it, that's OK. But NEVER autonomously decide to "build a landing page" or "create a blog site".
+## DEPLOY RULES (engineering tasks)
+- The engineering agent CAN deploy autonomously — BUT only when it serves a real business purpose.
+- **ONE company = ONE website project.** If a project already exists, UPDATE it — do NOT create a new project.
+- **NEVER create separate Vercel projects for small features** (no "pricing-page", "testimonial-section", "dark-mode" as separate projects). Add pages to the EXISTING site instead.
+- Only create engineering tasks for things that MATTER: the main company website, a critical landing page for a campaign, a product page that drives revenue.
+- If the company already has a website, improve it instead of creating new ones.
 
-## WHAT YOU SHOULD DO IN AUTONOMOUS MODE
+## WHAT TO FOCUS ON
 - **Research**: market analysis, competitor intel, customer insights
-- **Content**: write social media posts, blog drafts, marketing copy
-- **Email**: cold outreach sequences, follow-up campaigns (if Resend is connected)
+- **Content**: social media posts, blog drafts, marketing copy
+- **Email**: cold outreach sequences, follow-up campaigns
+- **Engineering**: improve the company website, add pages, fix issues (NOT create random new projects)
 - **Data**: analyze metrics, find insights, create reports
-- **Ads**: optimize ad campaigns, write new ad copy (if Meta is connected)
+- **Ads**: optimize ad campaigns, write new ad copy
+
+## SECURITY — NEVER LEAK CREDENTIALS
+- NEVER include API keys, secret keys, tokens, or passwords in any public content (posts, emails, websites).
+- NEVER tell an agent to display or publish a user's credentials.
+- Credentials are only used internally by agents to call APIs — they must NEVER appear in outputs.
 
 Rules:
 1. If there are pending tasks, DON'T create duplicates — just let them execute
@@ -140,7 +148,7 @@ Rules:
 3. Prioritize: revenue > growth > engagement > maintenance
 4. Fix failures before creating new work in the same area
 5. Create 2-3 specific, actionable tasks with DETAILED descriptions
-6. NEVER tag a task as "engineering" in autonomous mode — that is reserved for user-requested work
+6. If creating an engineering task, ALWAYS specify the existing project name to update — NEVER leave it open for a new project
 7. Use only agents that have their tools connected (check the tools list above)
 
 ${ctx.language !== 'en' ? `IMPORTANT: All task titles and descriptions must be in ${ctx.language}.` : ''}
@@ -283,12 +291,13 @@ async function finalizeCycle(
 
 // ─── Helper: select agents that should wake ──────────────────────────────────
 function selectAgentsToWake(integrations: string[]): string[] {
-  // NOTE: engineering is NOT auto-woken — site deployments require user request via chat
   const agents: string[] = ['research']
 
+  if (integrations.includes('vercel')) agents.push('engineering')
   if (integrations.includes('resend')) agents.push('email')
   if (integrations.some(i => ['twitter', 'linkedin', 'tiktok'].includes(i))) agents.push('content')
   if (integrations.includes('meta')) agents.push('ads')
+  if (integrations.includes('elevenlabs') || integrations.includes('videogen')) agents.push('content')
   agents.push('data')
 
   return [...new Set(agents)]
