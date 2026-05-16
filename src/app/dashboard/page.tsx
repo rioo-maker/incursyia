@@ -7,6 +7,7 @@ import Link from 'next/link'
 interface Task { id: string; title: string; tag: string; status: string; priority: string; created_at: string; completed_at?: string }
 interface Agent { id: string; name: string; type: string; status: string; model: string; total_tasks: number }
 interface Stats { revenue: number; companies: number; tasks_done: number }
+interface RevenueInfo { balance: number; has_stripe: boolean }
 interface ActivityItem { id: string; type: 'task' | 'agent'; title: string; detail: string; color: string; time: string }
 
 function StatusDot({ status }: { status: string }) {
@@ -38,11 +39,19 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  const [revenueInfo, setRevenueInfo] = useState<RevenueInfo | null>(null)
   const [activity, setActivity] = useState<ActivityItem[]>([])
 
-  // Fetch real stats from API
+  // Fetch real stats (for task count only)
   useEffect(() => {
     fetch('/api/stats').then(r => r.json()).then(setStats)
+  }, [])
+
+  // Fetch user's OWN revenue (not the global fake stats)
+  useEffect(() => {
+    fetch('/api/revenue').then(r => r.json()).then(data => {
+      if (!data.error) setRevenueInfo({ balance: data.balance ?? 0, has_stripe: data.has_stripe ?? false })
+    }).catch(() => {})
   }, [])
 
   // Fetch agents (global, not per-company)
@@ -118,7 +127,7 @@ export default function DashboardPage() {
           { label: 'Active tasks', value: activeTasks, color: 'var(--accent)' },
           { label: 'Pending tasks', value: pendingTasks, color: '#FCD34D' },
           { label: 'Agents busy', value: busyAgents, color: '#93C5FD' },
-          { label: 'Revenue (live)', value: stats ? `$${stats.revenue > 0 ? (stats.revenue / 1000).toFixed(1) + 'k' : '0'}` : '—', color: '#6EE7A0' },
+          { label: 'Revenue', value: revenueInfo ? (revenueInfo.has_stripe ? `$${revenueInfo.balance > 0 ? (revenueInfo.balance >= 1000 ? (revenueInfo.balance / 1000).toFixed(1) + 'k' : revenueInfo.balance.toString()) : '0'}` : 'Connect Stripe') : '—', color: '#6EE7A0' },
         ].map(k => (
           <Card key={k.label} style={{ padding: '20px 24px' }}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.08em' }}>{k.label}</div>

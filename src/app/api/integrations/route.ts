@@ -41,7 +41,96 @@ export async function GET() {
   return NextResponse.json(safe)
 }
 
-// POST /api/integrations — upsert credentials for a service
+// ─── Credential validation helpers ────────────────────────────────────────────
+
+async function validateStripe(creds: Record<string, string>): Promise<string | null> {
+  const key = creds.secret_key
+  if (!key) return 'Secret key is required'
+  if (!key.startsWith('sk_')) return 'Invalid Stripe key — must start with sk_live_ or sk_test_'
+  try {
+    const res = await fetch('https://api.stripe.com/v1/balance', {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return `Stripe rejected this key (HTTP ${res.status})`
+    return null
+  } catch {
+    return 'Could not reach Stripe API — check your key'
+  }
+}
+
+async function validateResend(creds: Record<string, string>): Promise<string | null> {
+  const key = creds.api_key
+  if (!key) return 'API key is required'
+  if (!key.startsWith('re_')) return 'Invalid Resend key — must start with re_'
+  try {
+    const res = await fetch('https://api.resend.com/domains', {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return `Resend rejected this key (HTTP ${res.status})`
+    return null
+  } catch {
+    return 'Could not reach Resend API — check your key'
+  }
+}
+
+async function validateGitHub(creds: Record<string, string>): Promise<string | null> {
+  const token = creds.token
+  if (!token) return 'Token is required'
+  if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) return 'Invalid GitHub token format'
+  try {
+    const res = await fetch('https://api.github.com/user', {
+      headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'IncursYIA' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return `GitHub rejected this token (HTTP ${res.status})`
+    return null
+  } catch {
+    return 'Could not reach GitHub API — check your token'
+  }
+}
+
+async function validateVercel(creds: Record<string, string>): Promise<string | null> {
+  const token = creds.api_token
+  if (!token) return 'API token is required'
+  try {
+    const res = await fetch('https://api.vercel.com/v2/user', {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return `Vercel rejected this token (HTTP ${res.status})`
+    return null
+  } catch {
+    return 'Could not reach Vercel API — check your token'
+  }
+}
+
+async function validateTelegram(creds: Record<string, string>): Promise<string | null> {
+  const token = creds.bot_token
+  if (!token) return 'Bot token is required'
+  if (!token.includes(':')) return 'Invalid bot token format — should look like 123456:ABC-DEF...'
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+      signal: AbortSignal.timeout(8000),
+    })
+    const data = await res.json()
+    if (!data.ok) return `Telegram rejected this bot token: ${data.description}`
+    return null
+  } catch {
+    return 'Could not reach Telegram API — check your bot token'
+  }
+}
+
+const VALIDATORS: Record<string, (creds: Record<string, string>) => Promise<string | null>> = {
+  stripe: validateStripe,
+  resend: validateResend,
+  github: validateGitHub,
+  vercel: validateVercel,
+  telegram: validateTelegram,
+}
+
+// POST /api/integrations — upsert credentials for a service (with validation)
 export async function POST(req: NextRequest) {
   const { supabase, companyId } = await getSupabaseAndCompany()
   if (!companyId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -61,6 +150,15 @@ export async function POST(req: NextRequest) {
   const merged = { ...(existing?.credentials ?? {}), ...credentials }
   // Remove any keys set to empty string
   Object.keys(merged).forEach(k => { if (!merged[k]) delete merged[k] })
+
+  // ── Validate credentials before saving ──────────────────────────────────
+  const validator = VALIDATORS[service]
+  if (validator) {
+    const error = await validator(merged)
+    if (error) {
+      return NextResponse.json({ error, validated: false }, { status: 400 })
+    }
+  }
 
   const { data, error } = await supabase
     .from('integrations')

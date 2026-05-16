@@ -167,13 +167,19 @@ export default function SettingsPage() {
     setTestingTelegram(true)
     setTestResult(null)
     try {
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      // First save the config, then test via our API (avoids CORS issues)
+      await saveNotifications()
+      const res = await fetch('/api/notifications/telegram', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: 'IncursYIA test notification - connection successful!' }),
+        body: JSON.stringify({ action: 'test' }),
       })
       const data = await res.json()
-      setTestResult(data.ok ? 'Test message sent successfully!' : `Error: ${data.description}`)
+      if (res.ok && data.ok) {
+        setTestResult('Test message sent successfully!')
+      } else {
+        setTestResult(`Error: ${data.error ?? 'Unknown error'}`)
+      }
     } catch {
       setTestResult('Failed to connect to Telegram')
     }
