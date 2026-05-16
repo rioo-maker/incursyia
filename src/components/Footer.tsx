@@ -2,9 +2,21 @@
 import { Logo } from './Logo'
 
 const cols = [
-  { title: 'Product', links: ['Features', 'How it works', 'Changelog'] },
-  { title: 'Company', links: ['About', 'Blog', 'Careers'] },
-  { title: 'Legal', links: ['Privacy', 'Terms', 'GDPR'] },
+  { title: 'Product', links: [
+    { label: 'Features', href: '#' },
+    { label: 'How it works', href: '#' },
+    { label: 'Changelog', href: '#' },
+  ]},
+  { title: 'Company', links: [
+    { label: 'About', href: '#' },
+    { label: 'Blog', href: '#' },
+    { label: 'Careers', href: '#' },
+  ]},
+  { title: 'Legal', links: [
+    { label: 'Privacy Policy', href: '/privacy' },
+    { label: 'Terms of Service', href: '/terms' },
+    { label: 'Legal Mentions', href: '/legal' },
+  ]},
 ]
 
 export function Footer() {
@@ -36,13 +48,13 @@ export function Footer() {
             }}>{col.title}</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {col.links.map(l => (
-                <a key={l} href="#" style={{
+                <a key={l.label} href={l.href} style={{
                   fontFamily: 'var(--font-body)', fontSize: 14,
                   color: 'var(--text-muted)', textDecoration: 'none', transition: 'color .2s',
                 }}
                   onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
                   onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-muted)')}
-                >{l}</a>
+                >{l.label}</a>
               ))}
             </div>
           </div>
