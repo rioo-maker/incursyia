@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { ollamaChat, AGENT_MODELS } from '@/lib/ollama'
+import { notifyReportGenerated } from '@/lib/notify'
 
 function db() {
   return createClient(
@@ -140,5 +141,9 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // ── Notify via Telegram ────────────────────────────────────────────────
+  await notifyReportGenerated(companyId, `Report ${weekStart} → ${weekEnd}`)
+
   return NextResponse.json(data)
 }

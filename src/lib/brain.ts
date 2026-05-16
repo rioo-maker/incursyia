@@ -2,6 +2,7 @@ import { ollamaChatStream, ollamaChat, AGENT_MODELS, modelForTag, OllamaMessage 
 import { buildBrainSystemPrompt, buildAgentPrompt } from './prompts'
 import { getCompanyIntegrations, getCredentials } from './integrations'
 import { extractAgentMessages } from './autonomous'
+import { notifyTaskCompleted, notifyTaskFailed } from './notify'
 import { createClient } from '@supabase/supabase-js'
 
 function db() {
@@ -321,11 +322,17 @@ export async function runAgentTask(taskId: string, language = 'en'): Promise<voi
     // Increment counters + set agent back to idle
     await sdb().rpc('increment_agent_stats', { p_agent_type: task.tag, p_success: true })
 
+    // ── Send Telegram notification ──
+    await notifyTaskCompleted(task.company_id, task.title, task.tag, actionsOk)
+
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     await sdb().from('task_logs').insert({ task_id: taskId, type: 'error', content: msg })
     await sdb().from('tasks').update({ status: 'failed', error: msg }).eq('id', taskId)
     // Set agent back to idle even on failure
     await sdb().rpc('increment_agent_stats', { p_agent_type: task.tag, p_success: false })
+
+    // ── Send Telegram failure notification ──
+    await notifyTaskFailed(task.company_id, task.title, task.tag, msg)
   }
 }
