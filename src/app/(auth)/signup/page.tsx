@@ -53,7 +53,7 @@ export default function SignupPage() {
     }
 
     setDone(true)
-    setTimeout(() => { window.location.href = '/dashboard' }, 1200)
+    setTimeout(() => { window.location.href = '/onboarding' }, 1200)
   }
 
   if (done) {

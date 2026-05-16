@@ -229,6 +229,24 @@ const SERVICES = [
     link: 'https://www.twilio.com/console',
   },
   {
+    id: 'telegram',
+    name: 'Telegram',
+    icon: '',
+    color: '#26A5E4',
+    description: 'Get real-time notifications when agents complete tasks, errors occur, or reports are generated.',
+    fields: [
+      { key: 'bot_token', label: 'Bot Token', placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11', secret: true },
+      { key: 'chat_id', label: 'Chat ID', placeholder: '-1001234567890 or your user ID', secret: false },
+    ],
+    guide: [
+      { step: 1, text: 'Open Telegram and message @BotFather' },
+      { step: 2, text: 'Send /newbot and follow the prompts to create your bot' },
+      { step: 3, text: 'Copy the bot token you receive' },
+      { step: 4, text: 'Message @userinfobot to get your chat ID, or add the bot to a group and use the group chat ID' },
+    ],
+    link: 'https://t.me/BotFather',
+  },
+  {
     id: 'sheets',
     name: 'Google Sheets / Excel',
     icon: '',
