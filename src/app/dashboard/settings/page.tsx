@@ -8,8 +8,16 @@ interface TeamMember {
   email: string
   role: string
   status: string
-  invited_at: string
-  joined_at: string | null
+  created_at: string
+  user_id: string | null
+}
+
+interface PendingInvitation {
+  id: string
+  email: string
+  role: string
+  status: string
+  created_at: string
 }
 
 interface NotificationChannel {
@@ -31,7 +39,13 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
 const ROLES = ['admin', 'editor', 'viewer']
 
 const ROLE_COLOR: Record<string, string> = {
-  admin: 'var(--accent)', editor: '#93C5FD', viewer: 'var(--text-muted)',
+  owner: '#FCD34D', admin: 'var(--accent)', editor: '#93C5FD', viewer: 'var(--text-muted)', member: 'var(--text-muted)',
+}
+
+const STATUS_COLOR: Record<string, { color: string; bg: string }> = {
+  active: { color: '#6EE7A0', bg: 'rgba(110,231,160,.1)' },
+  pending: { color: '#FCD34D', bg: 'rgba(252,211,77,.1)' },
+  declined: { color: '#F87171', bg: 'rgba(248,113,113,.1)' },
 }
 
 const EVENTS = [
@@ -47,10 +61,12 @@ export default function SettingsPage() {
 
   // Team state
   const [members, setMembers] = useState<TeamMember[]>([])
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([])
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('editor')
   const [inviting, setInviting] = useState(false)
+  const [inviteError, setInviteError] = useState('')
 
   // Notification state
   const [notifChannel, setNotifChannel] = useState<NotificationChannel | null>(null)
@@ -67,18 +83,25 @@ export default function SettingsPage() {
   const [testingTelegram, setTestingTelegram] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
 
-  // Load team members
+  // Load team members & pending invitations via API
+  const loadTeam = async () => {
+    if (!company) return
+    try {
+      const res = await fetch(`/api/team?company_id=${company.companyId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setMembers(data.members ?? [])
+        setPendingInvitations(data.invitations ?? [])
+      }
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     if (!company) return
-    const load = () => {
-      supabase.from('team_members').select('*')
-        .eq('company_id', company.companyId)
-        .order('invited_at', { ascending: true })
-        .then(({ data }) => setMembers((data as TeamMember[]) ?? []))
-    }
-    load()
-    const sub = supabase.channel('team_members')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'team_members', filter: `company_id=eq.${company.companyId}` }, load)
+    loadTeam()
+    const sub = supabase.channel('team_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'team_members', filter: `company_id=eq.${company.companyId}` }, loadTeam)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'team_invitations', filter: `company_id=eq.${company.companyId}` }, loadTeam)
       .subscribe()
     return () => { supabase.removeChannel(sub) }
   }, [company])
@@ -110,26 +133,40 @@ export default function SettingsPage() {
   const inviteMember = async () => {
     if (!company || !inviteEmail.trim()) return
     setInviting(true)
-    await supabase.from('team_members').insert({
-      company_id: company.companyId,
-      email: inviteEmail.trim(),
-      role: inviteRole,
-      status: 'pending',
-    })
-    setInviteEmail('')
-    setInviteRole('editor')
-    setShowInvite(false)
+    setInviteError('')
+
+    try {
+      const res = await fetch('/api/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          role: inviteRole,
+          company_id: company.companyId,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setInviteError(data.error ?? 'Failed to send invitation')
+      } else {
+        setInviteEmail('')
+        setInviteRole('editor')
+        setShowInvite(false)
+        loadTeam()
+      }
+    } catch {
+      setInviteError('Network error')
+    }
+
     setInviting(false)
-    // Refresh
-    const { data } = await supabase.from('team_members').select('*').eq('company_id', company.companyId).order('invited_at', { ascending: true })
-    setMembers((data as TeamMember[]) ?? [])
   }
 
   const removeMember = async (id: string) => {
     if (!company) return
     await supabase.from('team_members').delete().eq('id', id)
-    const { data } = await supabase.from('team_members').select('*').eq('company_id', company.companyId).order('invited_at', { ascending: true })
-    setMembers((data as TeamMember[]) ?? [])
+    loadTeam()
   }
 
   const saveNotifications = async () => {
@@ -225,7 +262,8 @@ export default function SettingsPage() {
 
       {/* TEAM TAB */}
       {tab === 'team' && (
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Active Members */}
           <Card>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Team Members</span>
@@ -243,8 +281,8 @@ export default function SettingsPage() {
             {/* Invite form */}
             {showInvite && (
               <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-deep)' }}>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
                     <label style={{ display: 'block', fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>
                       Email
                     </label>
@@ -281,7 +319,7 @@ export default function SettingsPage() {
                     {inviting ? '...' : 'Send Invite'}
                   </button>
                   <button
-                    onClick={() => setShowInvite(false)}
+                    onClick={() => { setShowInvite(false); setInviteError('') }}
                     style={{
                       padding: '10px 14px', background: 'transparent',
                       border: '1px solid var(--border-subtle)', borderRadius: 8,
@@ -291,62 +329,113 @@ export default function SettingsPage() {
                     Cancel
                   </button>
                 </div>
+                {inviteError && (
+                  <div style={{
+                    marginTop: 8, padding: '8px 12px',
+                    background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.2)',
+                    borderRadius: 6, fontFamily: 'var(--font-body)', fontSize: 12, color: '#F87171',
+                  }}>
+                    {inviteError}
+                  </div>
+                )}
               </div>
             )}
 
             {/* Members list */}
             <div style={{ padding: '8px 0' }}>
-              {members.length === 0 ? (
+              {members.length === 0 && pendingInvitations.length === 0 ? (
                 <div style={{ padding: '20px', fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
-                  No team members yet — invite your first teammate
+                  No team members yet -- invite your first teammate
                 </div>
-              ) : members.map(m => (
-                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: '50%',
-                    background: 'rgba(217,119,87,.15)', display: 'flex',
-                    alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--accent)',
-                  }}>
-                    {m.email.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-primary)' }}>
-                      {m.email}
+              ) : (
+                <>
+                  {/* Active members */}
+                  {members.map(m => (
+                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        background: 'rgba(217,119,87,.15)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--accent)',
+                      }}>
+                        {(m.email ?? '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-primary)' }}>
+                          {m.email ?? 'Team member'}
+                        </div>
+                        <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)' }}>
+                          Joined {new Date(m.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
+                        color: ROLE_COLOR[m.role] ?? 'var(--text-muted)',
+                        background: 'rgba(255,255,255,.04)', padding: '3px 10px', borderRadius: 20,
+                        textTransform: 'capitalize',
+                      }}>
+                        {m.role}
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
+                        color: STATUS_COLOR[m.status]?.color ?? 'var(--text-muted)',
+                        background: STATUS_COLOR[m.status]?.bg ?? 'rgba(255,255,255,.04)',
+                        padding: '3px 10px', borderRadius: 20,
+                        textTransform: 'capitalize',
+                      }}>
+                        {m.status}
+                      </span>
+                      <button
+                        onClick={() => removeMember(m.id)}
+                        style={{
+                          padding: '4px 10px', background: 'transparent',
+                          border: '1px solid var(--border-subtle)', borderRadius: 6,
+                          color: 'var(--text-muted)', fontFamily: 'var(--font-body)', fontSize: 11, cursor: 'pointer',
+                        }}
+                      >
+                        {'✕'}
+                      </button>
                     </div>
-                    <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)' }}>
-                      Invited {new Date(m.invited_at).toLocaleDateString()}
+                  ))}
+
+                  {/* Pending invitations */}
+                  {pendingInvitations.map(inv => (
+                    <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)', opacity: 0.7 }}>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        background: 'rgba(252,211,77,.1)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: '#FCD34D',
+                      }}>
+                        {inv.email.charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-primary)' }}>
+                          {inv.email}
+                        </div>
+                        <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)' }}>
+                          Invited {new Date(inv.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
+                        color: ROLE_COLOR[inv.role] ?? 'var(--text-muted)',
+                        background: 'rgba(255,255,255,.04)', padding: '3px 10px', borderRadius: 20,
+                        textTransform: 'capitalize',
+                      }}>
+                        {inv.role}
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
+                        color: '#FCD34D', background: 'rgba(252,211,77,.1)',
+                        padding: '3px 10px', borderRadius: 20,
+                      }}>
+                        Pending
+                      </span>
                     </div>
-                  </div>
-                  <span style={{
-                    fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
-                    color: ROLE_COLOR[m.role] ?? 'var(--text-muted)',
-                    background: 'rgba(255,255,255,.04)', padding: '3px 10px', borderRadius: 20,
-                    textTransform: 'capitalize',
-                  }}>
-                    {m.role}
-                  </span>
-                  {m.status === 'pending' && (
-                    <span style={{
-                      fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
-                      color: '#FCD34D', background: 'rgba(252,211,77,.1)',
-                      padding: '3px 10px', borderRadius: 20,
-                    }}>
-                      Pending
-                    </span>
-                  )}
-                  <button
-                    onClick={() => removeMember(m.id)}
-                    style={{
-                      padding: '4px 10px', background: 'transparent',
-                      border: '1px solid var(--border-subtle)', borderRadius: 6,
-                      color: 'var(--text-muted)', fontFamily: 'var(--font-body)', fontSize: 11, cursor: 'pointer',
-                    }}
-                  >
-                    {'✕'}
-                  </button>
-                </div>
-              ))}
+                  ))}
+                </>
+              )}
             </div>
           </Card>
         </div>
