@@ -33,6 +33,29 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const client = db()
 
+  // ── Plan check for Telegram ────────────────────────────────────────────
+  const cookieStore2 = await cookies()
+  const supabaseAuth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll() { return cookieStore2.getAll() }, setAll() {} } }
+  )
+  const { data: { user: authUser } } = await supabaseAuth.auth.getUser()
+  if (authUser) {
+    const { data: userProfile } = await db()
+      .from('profiles')
+      .select('plan, plan_expires_at')
+      .eq('id', authUser.id)
+      .single()
+    let userPlan = userProfile?.plan ?? 'free'
+    if (userPlan !== 'free' && userProfile?.plan_expires_at && new Date(userProfile.plan_expires_at) < new Date()) {
+      userPlan = 'free'
+    }
+    if (userPlan === 'free') {
+      return NextResponse.json({ error: 'Telegram notifications are a Pro feature. Upgrade to unlock.' }, { status: 403 })
+    }
+  }
+
   // ── Test action: send a test message ───────────────────────────────────
   if (body.action === 'test') {
     // Try to get credentials from DB first

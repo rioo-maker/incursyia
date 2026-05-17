@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { ollamaChat, AGENT_MODELS } from '@/lib/ollama'
 import { notifyReportGenerated } from '@/lib/notify'
+import { getReportsThisMonth } from '@/lib/limits'
 
 function db() {
   return createClient(
@@ -45,8 +46,33 @@ export async function GET() {
 
 // POST /api/reports/ceo — generate a new CEO report
 export async function POST(req: NextRequest) {
-  const { companyId } = await getSupabaseAndCompany()
+  const { supabase, companyId } = await getSupabaseAndCompany()
   if (!companyId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  // Get the user's plan
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { data: profile } = await db()
+    .from('profiles')
+    .select('plan, plan_expires_at')
+    .eq('id', user.id)
+    .single()
+
+  let plan = profile?.plan ?? 'free'
+  if (plan !== 'free' && profile?.plan_expires_at && new Date(profile.plan_expires_at) < new Date()) {
+    plan = 'free'
+  }
+
+  if (plan === 'free') {
+    return NextResponse.json({ error: 'CEO Reports are a Pro feature. Upgrade to Pro to generate weekly reports.' }, { status: 403 })
+  }
+
+  // Check monthly limit for Pro (4 reports/month)
+  const reportsUsed = await getReportsThisMonth(companyId)
+  if (reportsUsed >= 4) {
+    return NextResponse.json({ error: `You've reached the CEO report limit this month (${reportsUsed}/4).` }, { status: 429 })
+  }
 
   const client = db()
   const now = new Date()

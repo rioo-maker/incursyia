@@ -311,7 +311,26 @@ ${actionFormats}`,
 }
 
 export const PLAN_CONFIG = {
-  free:     { name: 'Free',     price: 0,   tasks: 2,   companies: 1  },
-  pro:      { name: 'Pro',      price: 49,  tasks: 60,  companies: 3  },
-  business: { name: 'Business', price: 149, tasks: 300, companies: 10 },
+  free: {
+    name: 'Free',
+    price: 0,
+    tasks_per_month: 5,
+    chat_per_day: 10,
+    companies: 1,
+    team_members: 0,
+    ceo_reports: 0,
+    telegram: false,
+    marketplace: false,
+  },
+  pro: {
+    name: 'Pro',
+    price: 19,
+    tasks_per_month: 30,
+    chat_per_day: 100,
+    companies: 3,
+    team_members: 3,
+    ceo_reports: 4,
+    telegram: true,
+    marketplace: true,
+  },
 }

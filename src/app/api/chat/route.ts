@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { streamBrainResponse } from '@/lib/brain'
 import { getCountryFromRequest, getLanguageFromCountry } from '@/lib/geo'
+import { checkChatLimit } from '@/lib/limits'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -44,13 +45,30 @@ export async function POST(req: NextRequest) {
     // Load profile for stored language preference
     const { data: profile } = await supabase
       .from('profiles')
-      .select('language, plan')
+      .select('language, plan, plan_expires_at')
       .eq('id', user.id)
       .single()
 
     if (profile) {
       if (!geoCountry) language = profile.language ?? 'en'
       plan = profile.plan ?? 'free'
+
+      // Auto-downgrade if plan expired
+      if (plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) < new Date()) {
+        plan = 'free'
+      }
+    }
+
+    // Check chat limit
+    const chatCheck = await checkChatLimit(user.id, plan)
+    if (!chatCheck.allowed) {
+      const limitMsg = plan === 'free'
+        ? `You've reached your daily chat limit (${chatCheck.used}/${chatCheck.limit}). Upgrade to Pro for 100 messages/day.`
+        : `You've reached your daily chat limit (${chatCheck.used}/${chatCheck.limit}).`
+      return new Response(
+        `data: ${JSON.stringify({ token: limitMsg })}\n\ndata: [DONE]\n\n`,
+        { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } }
+      )
     }
 
     // Load user's company + conversation

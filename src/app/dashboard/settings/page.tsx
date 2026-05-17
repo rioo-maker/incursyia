@@ -55,9 +55,23 @@ const EVENTS = [
   { key: 'weekly_report', label: 'Weekly report', desc: 'When a new CEO report is generated' },
 ]
 
+interface PlanInfo {
+  plan: string
+  plan_expires_at: string | null
+  days_remaining: number | null
+  tasks_used: number
+  chat_used: number
+}
+
 export default function SettingsPage() {
   const company = useCompany()
-  const [tab, setTab] = useState<'team' | 'notifications'>('team')
+  const [tab, setTab] = useState<'team' | 'notifications' | 'plan'>('team')
+
+  // Plan state
+  const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null)
+  const [licenseKey, setLicenseKey] = useState('')
+  const [activating, setActivating] = useState(false)
+  const [planMessage, setPlanMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Team state
   const [members, setMembers] = useState<TeamMember[]>([])
@@ -129,6 +143,45 @@ export default function SettingsPage() {
         }
       })
   }, [company])
+
+  // Load plan info
+  const loadPlanInfo = async () => {
+    try {
+      const res = await fetch('/api/license')
+      if (res.ok) {
+        const data = await res.json()
+        setPlanInfo(data)
+      }
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => {
+    loadPlanInfo()
+  }, [])
+
+  const activateLicense = async () => {
+    if (!licenseKey.trim()) return
+    setActivating(true)
+    setPlanMessage(null)
+    try {
+      const res = await fetch('/api/license', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: licenseKey.trim() }),
+      })
+      const data = await res.json()
+      if (res.ok && data.ok) {
+        setPlanMessage({ type: 'success', text: `Pro plan activated! Expires ${new Date(data.expires_at).toLocaleDateString()}.` })
+        setLicenseKey('')
+        loadPlanInfo()
+      } else {
+        setPlanMessage({ type: 'error', text: data.error ?? 'Activation failed' })
+      }
+    } catch {
+      setPlanMessage({ type: 'error', text: 'Network error' })
+    }
+    setActivating(false)
+  }
 
   const inviteMember = async () => {
     if (!company || !inviteEmail.trim()) return
@@ -243,7 +296,7 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        {(['team', 'notifications'] as const).map(t => (
+        {(['team', 'notifications', 'plan'] as const).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -436,6 +489,148 @@ export default function SettingsPage() {
                   ))}
                 </>
               )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* PLAN TAB */}
+      {tab === 'plan' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Current Plan */}
+          <Card>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Current Plan</span>
+              <span style={{
+                padding: '3px 12px', borderRadius: 20,
+                fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                background: planInfo?.plan === 'pro' ? 'rgba(217,119,87,.15)' : 'rgba(255,255,255,.06)',
+                color: planInfo?.plan === 'pro' ? 'var(--accent)' : 'var(--text-muted)',
+              }}>
+                {planInfo?.plan === 'pro' ? 'Pro' : 'Free'}
+              </span>
+            </div>
+            <div style={{ padding: '20px' }}>
+              {planInfo?.plan === 'pro' && planInfo.plan_expires_at && (
+                <div style={{ marginBottom: 16, padding: '12px 16px', background: 'rgba(217,119,87,.06)', border: '1px solid rgba(217,119,87,.15)', borderRadius: 8 }}>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-secondary)' }}>
+                    Expires: {new Date(planInfo.plan_expires_at).toLocaleDateString()}
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {planInfo.days_remaining} day{planInfo.days_remaining !== 1 ? 's' : ''} remaining
+                  </div>
+                </div>
+              )}
+
+              {/* Usage stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-deep)', borderRadius: 8 }}>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 600 }}>Tasks this month</div>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {planInfo?.tasks_used ?? 0}/{planInfo?.plan === 'pro' ? 30 : 5}
+                  </div>
+                  <div style={{
+                    marginTop: 6, height: 4, borderRadius: 2, background: 'rgba(255,255,255,.06)', overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      height: '100%', borderRadius: 2, background: 'var(--accent)',
+                      width: `${Math.min(100, ((planInfo?.tasks_used ?? 0) / (planInfo?.plan === 'pro' ? 30 : 5)) * 100)}%`,
+                      transition: 'width .3s',
+                    }} />
+                  </div>
+                </div>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-deep)', borderRadius: 8 }}>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 600 }}>Chat today</div>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {planInfo?.chat_used ?? 0}/{planInfo?.plan === 'pro' ? 100 : 10}
+                  </div>
+                  <div style={{
+                    marginTop: 6, height: 4, borderRadius: 2, background: 'rgba(255,255,255,.06)', overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      height: '100%', borderRadius: 2, background: '#93C5FD',
+                      width: `${Math.min(100, ((planInfo?.chat_used ?? 0) / (planInfo?.plan === 'pro' ? 100 : 10)) * 100)}%`,
+                      transition: 'width .3s',
+                    }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* License key input */}
+              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 20 }}>
+                <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                  Activate License Key
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <input
+                    type="text"
+                    placeholder="INCY-XXXX-XXXX-XXXX"
+                    value={licenseKey}
+                    onChange={e => setLicenseKey(e.target.value.toUpperCase())}
+                    maxLength={19}
+                    style={{
+                      ...inputStyle,
+                      flex: 1,
+                      fontFamily: 'monospace',
+                      letterSpacing: '.08em',
+                      fontSize: 14,
+                    }}
+                  />
+                  <button
+                    onClick={activateLicense}
+                    disabled={activating || !licenseKey.trim()}
+                    style={{
+                      padding: '10px 20px',
+                      background: activating ? 'rgba(217,119,87,.4)' : 'var(--accent)',
+                      border: 'none', borderRadius: 8, color: '#0C0C0C',
+                      fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {activating ? 'Activating...' : 'Activate Key'}
+                  </button>
+                </div>
+                {planMessage && (
+                  <div style={{
+                    marginTop: 10, padding: '8px 12px', borderRadius: 6,
+                    fontFamily: 'var(--font-body)', fontSize: 12,
+                    background: planMessage.type === 'success' ? 'rgba(110,231,160,.08)' : 'rgba(248,113,113,.08)',
+                    border: `1px solid ${planMessage.type === 'success' ? 'rgba(110,231,160,.2)' : 'rgba(248,113,113,.2)'}`,
+                    color: planMessage.type === 'success' ? '#6EE7A0' : '#F87171',
+                  }}>
+                    {planMessage.text}
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          {/* Plan comparison */}
+          <Card>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+              <span style={{ fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Plan Details</span>
+            </div>
+            <div style={{ padding: '8px 0' }}>
+              {[
+                { label: 'Tasks / month', free: '5', pro: '30' },
+                { label: 'Chat messages / day', free: '10', pro: '100' },
+                { label: 'Companies', free: '1', pro: '3' },
+                { label: 'Team members', free: '0', pro: '3' },
+                { label: 'CEO Reports / month', free: '--', pro: '4' },
+                { label: 'Telegram notifications', free: '--', pro: 'Yes' },
+                { label: 'Marketplace skills', free: '--', pro: 'Unlimited' },
+              ].map(row => (
+                <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', padding: '10px 20px', borderBottom: '1px solid var(--border-subtle)', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-secondary)' }}>{row.label}</span>
+                  <span style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>{row.free}</span>
+                  <span style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--accent)', textAlign: 'center', fontWeight: 600 }}>{row.pro}</span>
+                </div>
+              ))}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', padding: '10px 20px', alignItems: 'center' }}>
+                <span />
+                <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>Free</span>
+                <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--accent)', textAlign: 'center', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>Pro</span>
+              </div>
             </div>
           </Card>
         </div>

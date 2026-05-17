@@ -9,6 +9,7 @@ interface Agent { id: string; name: string; type: string; status: string; model:
 interface Stats { revenue: number; companies: number; tasks_done: number }
 interface RevenueInfo { balance: number; has_stripe: boolean }
 interface ActivityItem { id: string; type: 'task' | 'agent'; title: string; detail: string; color: string; time: string }
+interface PlanUsage { plan: string; tasks_used: number; chat_used: number }
 
 function StatusDot({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -41,6 +42,14 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [revenueInfo, setRevenueInfo] = useState<RevenueInfo | null>(null)
   const [activity, setActivity] = useState<ActivityItem[]>([])
+  const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null)
+
+  // Fetch plan usage info
+  useEffect(() => {
+    fetch('/api/license').then(r => r.json()).then(data => {
+      if (!data.error) setPlanUsage({ plan: data.plan, tasks_used: data.tasks_used, chat_used: data.chat_used })
+    }).catch(() => {})
+  }, [])
 
   // Fetch real stats (for task count only)
   useEffect(() => {
@@ -135,6 +144,38 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* Plan usage bar */}
+      {planUsage && (
+        <Card style={{ padding: '14px 24px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-muted)' }}>
+                Tasks this month
+              </span>
+              <span style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {planUsage.tasks_used}/{planUsage.plan === 'pro' ? 30 : 5}
+              </span>
+            </div>
+            <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2,
+                background: (planUsage.tasks_used / (planUsage.plan === 'pro' ? 30 : 5)) > 0.8 ? '#F87171' : 'var(--accent)',
+                width: `${Math.min(100, (planUsage.tasks_used / (planUsage.plan === 'pro' ? 30 : 5)) * 100)}%`,
+                transition: 'width .3s',
+              }} />
+            </div>
+          </div>
+          <span style={{
+            padding: '3px 10px', borderRadius: 20,
+            fontFamily: 'var(--font-body)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+            background: planUsage.plan === 'pro' ? 'rgba(217,119,87,.15)' : 'rgba(255,255,255,.06)',
+            color: planUsage.plan === 'pro' ? 'var(--accent)' : 'var(--text-muted)',
+          }}>
+            {planUsage.plan}
+          </span>
+        </Card>
+      )}
 
       {/* Activity Feed + Agents row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>

@@ -26,7 +26,8 @@ export interface Profile {
   full_name: string | null
   country: string | null
   language: string
-  plan: 'free' | 'pro' | 'business'
+  plan: 'free' | 'pro'
+  plan_expires_at: string | null
   tasks_used_this_month: number
   tasks_reset_at: string
 }

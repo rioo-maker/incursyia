@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { runWakeCycle } from '@/lib/autonomous'
+import { checkTaskLimit } from '@/lib/limits'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -88,7 +89,38 @@ export async function GET(req: NextRequest) {
         continue
       }
 
-      // ── 4. Run the full wake cycle for this company ───────────────────
+      // ── 4. Check task limit before running wake cycle ────────────────
+      // Get company owner's plan
+      const { data: companyFull } = await sdb()
+        .from('companies')
+        .select('user_id')
+        .eq('id', company.id)
+        .single()
+
+      if (companyFull) {
+        const { data: ownerProfile } = await sdb()
+          .from('profiles')
+          .select('plan, plan_expires_at')
+          .eq('id', companyFull.user_id)
+          .single()
+
+        let ownerPlan = ownerProfile?.plan ?? 'free'
+        if (ownerPlan !== 'free' && ownerProfile?.plan_expires_at && new Date(ownerProfile.plan_expires_at) < new Date()) {
+          ownerPlan = 'free'
+        }
+
+        const taskCheck = await checkTaskLimit(company.id, ownerPlan)
+        if (!taskCheck.allowed) {
+          results.push({
+            company: company.name,
+            tasksCreated: 0, tasksExecuted: 0, messages: 0,
+            errors: [`Task limit reached (${taskCheck.used}/${taskCheck.limit})`],
+          })
+          continue
+        }
+      }
+
+      // ── 5. Run the full wake cycle for this company ───────────────────
       try {
         const cycleResult = await runWakeCycle(company.id)
         results.push({
