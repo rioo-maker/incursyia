@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
+import { getCredentials } from '@/lib/integrations'
 
 function db() {
   return createClient(
@@ -50,6 +51,10 @@ export async function POST(req: NextRequest) {
 
   const client = db()
 
+  // Get company name for the invite email
+  const { data: company } = await client.from('companies').select('name').eq('id', companyId).single()
+  const companyName = company?.name ?? 'a company'
+
   const { data, error } = await client
     .from('team_invitations')
     .insert({
@@ -63,5 +68,48 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+
+  // ── Send invite email via Resend (if connected) ────────────────────────
+  let emailSent = false
+  try {
+    const creds = await getCredentials(companyId, 'resend')
+    if (creds.api_key) {
+      const appUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : (process.env.NEXT_PUBLIC_APP_URL ?? 'https://app-topaz-chi-44.vercel.app')
+
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${creds.api_key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: creds.from_email || `IncursYIA <noreply@${creds.from_email?.split('@')[1] || 'incursyia.com'}>`,
+          to: email,
+          subject: `You're invited to join ${companyName} on IncursYIA`,
+          html: `
+            <div style="font-family:system-ui,sans-serif;max-width:500px;margin:0 auto;padding:40px 20px">
+              <h2 style="color:#E8E8ED;margin-bottom:8px">You've been invited!</h2>
+              <p style="color:#9CA3AF;line-height:1.6">
+                You've been invited to join <strong style="color:#E8E8ED">${companyName}</strong> on IncursYIA as a <strong style="color:#D97757">${role ?? 'member'}</strong>.
+              </p>
+              <p style="color:#9CA3AF;line-height:1.6">
+                IncursYIA is an AI co-founder that helps run your business autonomously.
+              </p>
+              <a href="${appUrl}/signup" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D97757;color:#0C0C0C;border-radius:8px;text-decoration:none;font-weight:600">
+                Accept Invitation →
+              </a>
+              <p style="color:#6B7280;font-size:12px;margin-top:24px">
+                If you didn't expect this invitation, you can ignore this email.
+              </p>
+            </div>
+          `,
+        }),
+        signal: AbortSignal.timeout(10000),
+      })
+      emailSent = res.ok
+    }
+  } catch {
+    // Email sending is best-effort — don't fail the invitation
+  }
+
+  return NextResponse.json({ ...data, email_sent: emailSent })
 }

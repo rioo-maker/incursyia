@@ -24,9 +24,16 @@ export default function SignupPage() {
     setLoading(true)
     setError('')
 
+    const redirectUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/login?confirmed=true`
+      : 'https://app-topaz-chi-44.vercel.app/login?confirmed=true'
+
     const { data, error: authErr } = await supabase.auth.signUp({
       email, password,
-      options: { data: { company_name: companyName } },
+      options: {
+        data: { company_name: companyName },
+        emailRedirectTo: redirectUrl,
+      },
     })
 
     if (authErr) {
@@ -53,16 +60,35 @@ export default function SignupPage() {
     }
 
     setDone(true)
-    setTimeout(() => { window.location.href = '/onboarding' }, 1200)
   }
 
   if (done) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-deep)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--accent-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', color: 'var(--accent)', fontSize: 28 }}>✓</div>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 26, color: 'var(--text-primary)' }}>Account created</h2>
-          <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-muted)', marginTop: 8 }}>Launching your dashboard...</p>
+        <div style={{ textAlign: 'center', maxWidth: 420, padding: 24 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--accent-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', color: 'var(--accent)', fontSize: 28 }}>✉</div>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 26, color: 'var(--text-primary)' }}>Check your email</h2>
+          <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.6 }}>
+            We sent a confirmation link to <strong style={{ color: 'var(--text-primary)' }}>{email}</strong>.
+          </p>
+          <p style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.6 }}>
+            Click the link in the email to activate your account, then come back here to sign in.
+          </p>
+          <div style={{
+            marginTop: 20, padding: '12px 16px', background: 'rgba(217,119,87,.08)',
+            border: '1px solid rgba(217,119,87,.2)', borderRadius: 8,
+            fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--accent)', lineHeight: 1.5,
+          }}>
+            Don&apos;t see it? Check your spam folder. The email comes from noreply@mail.app.supabase.io
+          </div>
+          <Link href="/login" style={{
+            display: 'inline-block', marginTop: 20, padding: '12px 24px',
+            background: 'var(--accent)', borderRadius: 8, color: '#0C0C0C',
+            fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600,
+            textDecoration: 'none',
+          }}>
+            Go to Sign In →
+          </Link>
         </div>
       </div>
     )

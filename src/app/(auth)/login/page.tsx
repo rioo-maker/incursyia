@@ -1,14 +1,23 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Logo } from '@/components/Logo'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('confirmed') === 'true') setConfirmed(true)
+    } catch {}
+  }, [])
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '15px 18px', fontSize: 15,
@@ -50,6 +59,16 @@ export default function LoginPage() {
         <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-muted)', marginBottom: 28 }}>
           Sign in to your account.
         </p>
+
+        {confirmed && (
+          <div style={{
+            marginBottom: 16, padding: '12px 16px', background: 'rgba(110,231,160,.08)',
+            border: '1px solid rgba(110,231,160,.25)', borderRadius: 8,
+            fontFamily: 'var(--font-body)', fontSize: 13, color: '#6EE7A0',
+          }}>
+            ✓ Email confirmed! You can now sign in.
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <input

@@ -275,6 +275,7 @@ export default function ConnectionsPage() {
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     if (!company) return
@@ -359,8 +360,30 @@ export default function ConnectionsPage() {
         </p>
       </div>
 
+      {/* Search bar */}
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search connections... (Stripe, Telegram, GitHub...)"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            width: '100%', padding: '11px 16px', paddingLeft: 40,
+            background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+            borderRadius: 10, color: 'var(--text-primary)', fontFamily: 'var(--font-body)',
+            fontSize: 14, outline: 'none', boxSizing: 'border-box',
+          }}
+          onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+          onBlur={e => (e.target.style.borderColor = 'var(--border-subtle)')}
+        />
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {SERVICES.map(svc => {
+        {SERVICES.filter(svc => {
+          if (!search.trim()) return true
+          const q = search.toLowerCase()
+          return svc.name.toLowerCase().includes(q) || svc.id.toLowerCase().includes(q) || svc.description.toLowerCase().includes(q)
+        }).map(svc => {
           const connected = isConnected(svc.id)
           const open = expanded === svc.id
           const fieldVals = form[svc.id] ?? {}
